@@ -1203,6 +1203,10 @@ def main_streamlit() -> None:
         st.session_state["symbol_select_widget"] = st.session_state["selected_symbol"]
     if st.session_state["symbol_select_widget"] not in symbols:
         st.session_state["symbol_select_widget"] = st.session_state["selected_symbol"]
+    if "pending_symbol_pick" in st.session_state and st.session_state["pending_symbol_pick"] in symbols:
+        st.session_state["selected_symbol"] = st.session_state["pending_symbol_pick"]
+        st.session_state["symbol_select_widget"] = st.session_state["pending_symbol_pick"]
+        del st.session_state["pending_symbol_pick"]
 
     try_autorefresh(auto_scan, interval)
 
@@ -1228,8 +1232,7 @@ def main_streamlit() -> None:
         render_scan_overview(live_scan_df)
         picked = render_scanner_table(live_scan_df, key_prefix="top")
         if picked:
-            st.session_state["selected_symbol"] = picked
-            st.session_state["symbol_select_widget"] = picked
+            st.session_state["pending_symbol_pick"] = picked
             st.success(f"{picked} grafik analiz için seçildi. Grafik Analiz sekmesine geçebilirsin.")
             st.rerun()
 
@@ -1244,8 +1247,7 @@ def main_streamlit() -> None:
             render_scan_overview(live_scan_df)
             picked_tab = render_scanner_table(live_scan_df, key_prefix="tab")
             if picked_tab:
-                st.session_state["selected_symbol"] = picked_tab
-                st.session_state["symbol_select_widget"] = picked_tab
+                st.session_state["pending_symbol_pick"] = picked_tab
                 st.success(f"{picked_tab} grafik analiz için seçildi.")
                 st.rerun()
 
