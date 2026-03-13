@@ -1199,12 +1199,17 @@ def main_streamlit() -> None:
         st.session_state["selected_symbol"] = symbols[0]
     if st.session_state["selected_symbol"] not in symbols:
         st.session_state["selected_symbol"] = symbols[0]
+    if "symbol_select_widget" not in st.session_state:
+        st.session_state["symbol_select_widget"] = st.session_state["selected_symbol"]
+    if st.session_state["symbol_select_widget"] not in symbols:
+        st.session_state["symbol_select_widget"] = st.session_state["selected_symbol"]
 
     try_autorefresh(auto_scan, interval)
 
     left, right = st.columns([2.3, 1])
     with left:
-        selected_symbol = st.selectbox("Hisse seç", symbols, index=symbols.index(st.session_state["selected_symbol"]), key="selected_symbol")
+        selected_symbol = st.selectbox("Hisse seç", symbols, index=symbols.index(st.session_state["symbol_select_widget"]), key="symbol_select_widget")
+        st.session_state["selected_symbol"] = selected_symbol
     with right:
         analyze_btn = st.button("Analizi Çalıştır", use_container_width=True)
 
@@ -1224,7 +1229,9 @@ def main_streamlit() -> None:
         picked = render_scanner_table(live_scan_df)
         if picked:
             st.session_state["selected_symbol"] = picked
+            st.session_state["symbol_select_widget"] = picked
             st.success(f"{picked} grafik analiz için seçildi. Grafik Analiz sekmesine geçebilirsin.")
+            st.rerun()
 
     tabs = st.tabs(["🛰️ Scanner", "📊 Grafik Analiz", "🧭 Zaman Matrisi", "🗃️ Geçmiş"])
 
@@ -1238,7 +1245,9 @@ def main_streamlit() -> None:
             picked_tab = render_scanner_table(live_scan_df)
             if picked_tab:
                 st.session_state["selected_symbol"] = picked_tab
+                st.session_state["symbol_select_widget"] = picked_tab
                 st.success(f"{picked_tab} grafik analiz için seçildi.")
+                st.rerun()
 
     with tabs[1]:
         active_symbol = st.session_state.get("selected_symbol", selected_symbol)
