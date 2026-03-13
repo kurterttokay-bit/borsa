@@ -40,23 +40,19 @@ TIMEFRAME_MAP = {
     "1W": {"interval": "1wk", "period": "5y"},
 }
 
-BIST_30 = [
-    "AKBNK.IS", "ALARK.IS", "ASELS.IS", "ASTOR.IS", "BIMAS.IS", "EKGYO.IS",
-    "ENKAI.IS", "EREGL.IS", "FROTO.IS", "GARAN.IS", "GUBRF.IS", "HEKTS.IS",
-    "ISCTR.IS", "KCHOL.IS", "KONTR.IS", "KOZAA.IS", "KOZAL.IS", "ODAS.IS",
-    "OYAKC.IS", "PETKM.IS", "PGSUS.IS", "SAHOL.IS", "SASA.IS", "SISE.IS",
-    "TAVHL.IS", "TCELL.IS", "THYAO.IS", "TOASO.IS", "TUPRS.IS", "YKBNK.IS",
+US_MEGA_CAPS = [
+    "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA", "AMD", "NFLX", "AVGO",
+    "PLTR", "CRM", "ORCL", "ADBE", "INTC", "QCOM", "MU", "SMCI", "PANW", "SNOW",
 ]
 
-BIST_100_EXTRA = [
-    "AEFES.IS", "AGHOL.IS", "AKSA.IS", "ARCLK.IS", "BERA.IS", "CIMSA.IS",
-    "DOHOL.IS", "ECILC.IS", "EGEEN.IS", "ENERY.IS", "GENIL.IS", "GESAN.IS",
-    "HALKB.IS", "ISMEN.IS", "KARSN.IS", "KTLEV.IS", "MAVI.IS", "MGROS.IS",
-    "OTKAR.IS", "QUAGR.IS", "SKBNK.IS", "SMRTG.IS", "SOKM.IS", "TKFEN.IS",
-    "TTKOM.IS", "ULKER.IS", "VAKBN.IS", "VESBE.IS", "VESTL.IS", "YEOTK.IS",
+US_GROWTH = [
+    "COIN", "SHOP", "UBER", "ABNB", "CRWD", "DDOG", "ZS", "NET", "RBLX", "SOFI",
+    "ARM", "MRVL", "MSTR", "PYPL", "SQ", "CFLT", "FSLR", "ENPH", "DKNG", "ROKU",
 ]
 
-DEFAULT_SYMBOLS = BIST_30.copy()
+US_ETFS = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "SMH"]
+
+DEFAULT_SYMBOLS = US_MEGA_CAPS.copy()
 
 PROFILE_CONFIGS: Dict[str, Dict[str, Any]] = {
     "Korumacı": {
@@ -285,10 +281,12 @@ def strength_color(strength: float) -> str:
 
 
 def universe_options() -> Dict[str, List[str]]:
-    bist100 = sorted(list(set(BIST_30 + BIST_100_EXTRA)))
+    us_all = sorted(list(set(US_MEGA_CAPS + US_GROWTH + US_ETFS)))
     return {
-        "BIST 30": BIST_30,
-        "BIST 100": bist100,
+        "US Mega Caps": US_MEGA_CAPS,
+        "US Growth": US_GROWTH,
+        "US ETFs": US_ETFS,
+        "US Mixed": us_all,
         "Hazır Liste": DEFAULT_SYMBOLS,
     }
 
@@ -1058,7 +1056,7 @@ def sidebar() -> Tuple[List[str], str, bool, int, int, str, str]:
         selected_universe = st.sidebar.selectbox("Liste seç", list(predefined.keys()), index=0)
         symbols = predefined[selected_universe]
     else:
-        raw_text = st.sidebar.text_area("Semboller (.IS ile, virgül ile ayır)", value=",".join(BIST_30[:8]), height=130)
+        raw_text = st.sidebar.text_area("Semboller (.IS ile, virgül ile ayır)", value=",".join(DEFAULT_SYMBOLS[:8]), height=130)
         symbols = [s.strip().upper() for s in raw_text.split(",") if s.strip()]
 
     st.sidebar.markdown("### Üye Profili")
