@@ -179,6 +179,19 @@ def init_db() -> None:
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS portfolio (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT,
+            symbol TEXT,
+            entry_price REAL,
+            quantity REAL,
+            note TEXT,
+            status TEXT DEFAULT 'open'
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -224,6 +237,44 @@ def load_recent_signals(limit: int = 150) -> pd.DataFrame:
     )
     conn.close()
     return df
+
+
+def add_portfolio_position(symbol: str, entry_price: float, quantity: float, note: str = "") -> None:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO portfolio (created_at, symbol, entry_price, quantity, note, status)
+        VALUES (?, ?, ?, ?, ?, 'open')
+        """,
+        (
+            datetime.now().isoformat(timespec="seconds"),
+            symbol,
+            float(entry_price),
+            float(quantity),
+            note,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_open_portfolio() -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query(
+        "SELECT * FROM portfolio WHERE status = 'open' ORDER BY id DESC",
+        conn,
+    )
+    conn.close()
+    return df
+
+
+def close_portfolio_position(position_id: int) -> None:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("UPDATE portfolio SET status = 'closed' WHERE id = ?", (int(position_id),))
+    conn.commit()
+    conn.close()
 
 
 def safe_float(value) -> Optional[float]:
@@ -1232,7 +1283,9 @@ def render_radar_cards(scan_df: pd.DataFrame, key_prefix: str = "radar") -> Opti
             if st.button("Grafik", key=f"{key_prefix}_graph_{row['Sembol']}_{i}", use_container_width=True):
                 selected_symbol = str(row["Sembol"])
         with c2:
-            st.button("Portföye Ekle", key=f"{key_prefix}_portfolio_{row['Sembol']}_{i}", use_container_width=True)
+            if st.button("Portföye Ekle", key=f"{key_prefix}_portfolio_{row['Sembol']}_{i}", use_container_width=True):
+                st.session_state["portfolio_prefill_symbol"] = str(row["Sembol"])
+                st.success(f"{row['Sembol']} portföy formuna hazırlandı.")
     st.markdown('</div>', unsafe_allow_html=True)
     return selected_symbol
 
@@ -1249,6 +1302,83 @@ def render_alert_preview() -> None:
             f"<div class='alert-item'><div class='alert-dot' style='background:{color};'></div><div><div class='signal-value' style='font-size:0.98rem; margin-bottom:0.2rem;'>{title}</div><div class='signal-note'>{body}</div></div></div>",
             unsafe_allow_html=True,
         )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_portfolio_tab(default_symbol: str) -> None:
+    st.markdown('<div class="panel-card"><div class="section-title">Demo Portföy</div><div class="section-sub">Midas\'ta açtığın işlemleri burada izleme portföyüne ekle. Radar\'dan gelen seçimler otomatik dolar.</div>', unsafe_allow_html=True)
+
+    if "portfolio_prefill_symbol" not in st.session_state:
+        st.session_state["portfolio_prefill_symbol"] = default_symbol
+    if st.session_state["portfolio_prefill_symbol"] == "":
+        st.session_state["portfolio_prefill_symbol"] = default_symbol
+
+    with st.form("portfolio_add_form", clear_on_submit=False):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            symbol = st.text_input("Sembol", value=st.session_state.get("portfolio_prefill_symbol", default_symbol))
+        with c2:
+            entry_price = st.number_input("Alış Fiyatı", min_value=0.0, value=0.0, step=0.01)
+        with c3:
+            quantity = st.number_input("Adet", min_value=1.0, value=1.0, step=1.0)
+        note = st.text_input("Not", value="Midas işlemi")
+        submitted = st.form_submit_button("Portföye Ekle", use_container_width=True)
+        if submitted:
+            if symbol.strip() and entry_price > 0 and quantity > 0:
+                add_portfolio_position(symbol.strip().upper(), float(entry_price), float(quantity), note.strip())
+                st.session_state["portfolio_prefill_symbol"] = symbol.strip().upper()
+                st.success(f"{symbol.strip().upper()} portföye eklendi.")
+                st.rerun()
+            else:
+                st.warning("Sembol, alış fiyatı ve adet bilgisi gerekli.")
+
+    open_df = load_open_portfolio()
+    if open_df.empty:
+        st.info("Henüz açık pozisyon yok.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    rows = []
+    for _, row in open_df.iterrows():
+        raw = download_symbol(str(row["symbol"]), "1D")
+        current_price = None
+        pnl = None
+        pnl_pct = None
+        status = "İZLENİYOR"
+        if not raw.empty:
+            current_price = float(raw["Close"].iloc[-1])
+            pnl = (current_price - float(row["entry_price"])) * float(row["quantity"])
+            pnl_pct = ((current_price / float(row["entry_price"])) - 1) * 100 if float(row["entry_price"]) else None
+            if pnl_pct is not None and pnl_pct >= 3:
+                status = "TUT / TP YAKIN"
+            elif pnl_pct is not None and pnl_pct <= -3:
+                status = "DİKKAT"
+            else:
+                status = "TUT"
+        rows.append({
+            "ID": int(row["id"]),
+            "Sembol": str(row["symbol"]),
+            "Alış": format_price(float(row["entry_price"])),
+            "Güncel": format_price(current_price) if current_price is not None else "-",
+            "Adet": row["quantity"],
+            "PnL": "-" if pnl is None else format_price(pnl),
+            "PnL %": "-" if pnl_pct is None else f"%{round(float(pnl_pct), 2)}",
+            "Durum": status,
+            "Not": str(row["note"] or ""),
+        })
+
+    table_df = pd.DataFrame(rows)
+    st.dataframe(table_df.drop(columns=["ID"]), use_container_width=True, hide_index=True)
+
+    st.markdown("#### Pozisyon Kapat")
+    close_cols = st.columns(min(3, len(rows)))
+    for idx, row in enumerate(rows[:3]):
+        with close_cols[idx]:
+            if st.button(f"{row['Sembol']} Kapat", key=f"close_pos_{row['ID']}", use_container_width=True):
+                close_portfolio_position(int(row["ID"]))
+                st.success(f"{row['Sembol']} kapatıldı.")
+                st.rerun()
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -1403,14 +1533,7 @@ def main_streamlit() -> None:
                 st.markdown('<div class="footer-note">Bu analiz yatırım tavsiyesi değildir.</div>', unsafe_allow_html=True)
 
     with tabs[2]:
-        st.markdown('<div class="panel-card"><div class="section-title">Demo Portföy</div><div class="section-sub">Midas üzerinde açtığın işlemleri buraya manuel girip portföy asistanı gibi takip edeceğiz.</div>', unsafe_allow_html=True)
-        c1, c2, c3, c4 = st.columns(4)
-        c1.text_input("Sembol", value=st.session_state.get("selected_symbol", selected_symbol), key="portfolio_symbol")
-        c2.number_input("Alış Fiyatı", min_value=0.0, value=0.0, step=0.1, key="portfolio_entry")
-        c3.number_input("Adet", min_value=1, value=1, step=1, key="portfolio_qty")
-        c4.button("Portföye Ekle", use_container_width=True, key="portfolio_add_btn")
-        st.info("Bu sürümde portföy formu layout olarak hazırlandı. Sonraki turda kayıt, PnL ve alarm mantığını bağlayacağız.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        render_portfolio_tab(st.session_state.get("selected_symbol", selected_symbol))
 
     with tabs[3]:
         render_alert_preview()
@@ -1478,7 +1601,7 @@ class TestSmcApp(unittest.TestCase):
         self.assertEqual(format_price(None), "-")
 
     def test_extract_tv_symbol(self):
-        self.assertEqual(extract_tv_symbol("THYAO.IS"), "THYAO")
+        self.assertEqual(extract_tv_symbol("AAPL"), "AAPL")
 
     def test_profile_summary(self):
         s = profile_summary("Dengeli", "Orta")
@@ -1487,7 +1610,7 @@ class TestSmcApp(unittest.TestCase):
 
     def test_apply_profile_filter(self):
         result = AnalysisResult(
-            symbol="THYAO.IS",
+            symbol="AAPL",
             timeframe="1H",
             close=100,
             ema200=95,
@@ -1521,6 +1644,11 @@ class TestSmcApp(unittest.TestCase):
             profile_fit=False,
         )
         self.assertTrue(apply_profile_filter(result, "Korumacı"))
+
+    def test_universe_defaults_us(self):
+        options = universe_options()
+        self.assertIn("US Mega Caps", options)
+        self.assertIn("AAPL", options["US Mega Caps"])
 
 
 def run_tests() -> int:
