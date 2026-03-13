@@ -1100,30 +1100,64 @@ def render_signal_boxes(result: AnalysisResult) -> None:
 
 def sidebar() -> Tuple[List[str], str, bool, int, int, str, str]:
     st.sidebar.markdown("## ⚙️ Kontrol Merkezi")
+    if "profil_kilitli" not in st.session_state:
+        st.session_state["profil_kilitli"] = False
+
     predefined = universe_options()
-    mode = st.sidebar.radio("Evren", ["Hazır Liste", "Özel Liste"], index=0)
 
-    if mode == "Hazır Liste":
-        selected_universe = st.sidebar.selectbox("Liste seç", list(predefined.keys()), index=0)
-        symbols = predefined[selected_universe]
+    if not st.session_state["profil_kilitli"]:
+        mode = st.sidebar.radio("Evren", ["Hazır Liste", "Özel Liste"], index=0)
+
+        if mode == "Hazır Liste":
+            selected_universe = st.sidebar.selectbox("Piyasa Listesi", list(predefined.keys()), index=0)
+            symbols = predefined[selected_universe]
+        else:
+            raw_text = st.sidebar.text_area("Semboller (virgülle ayır)", value=",".join(DEFAULT_SYMBOLS[:8]), height=130)
+            symbols = [s.strip().upper() for s in raw_text.split(",") if s.strip()]
+
+        st.sidebar.markdown("### Üye Profili")
+        profile_name = st.sidebar.selectbox("Profil Tarzı", list(PROFILE_CONFIGS.keys()), index=1)
+        risk_mode = st.sidebar.selectbox("Risk Seviyesi", list(RISK_CONFIGS.keys()), index=1)
+        timeframe = st.sidebar.selectbox("Zaman Dilimi", ["1H", "4H", "1D", "1W"], index=0)
+        auto_scan = st.sidebar.checkbox("Otomatik Yenile", value=False)
+        interval = st.sidebar.selectbox("Tarama Periyodu (dk)", [5, 15, 30, 60], index=1)
+        matrix_count = st.sidebar.slider("Zaman Matrisi Sembol Sayısı", 4, min(20, max(4, len(symbols))), min(8, len(symbols)))
+
+        if st.sidebar.button("Profili Kilitle ve Portföye Geç", use_container_width=True):
+            st.session_state["profil_kilitli"] = True
+            st.session_state["secili_semboller"] = symbols
+            st.session_state["secili_profil"] = profile_name
+            st.session_state["secili_risk"] = risk_mode
+            st.session_state["secili_tf"] = timeframe
+            st.session_state["secili_auto_scan"] = auto_scan
+            st.session_state["secili_interval"] = interval
+            st.session_state["secili_matrix_count"] = matrix_count
+            st.rerun()
     else:
-        raw_text = st.sidebar.text_area("Semboller (.IS ile, virgül ile ayır)", value=",".join(DEFAULT_SYMBOLS[:8]), height=130)
-        symbols = [s.strip().upper() for s in raw_text.split(",") if s.strip()]
+        symbols = st.session_state.get("secili_semboller", DEFAULT_SYMBOLS)
+        profile_name = st.session_state.get("secili_profil", "Dengeli")
+        risk_mode = st.session_state.get("secili_risk", "Orta")
+        timeframe = st.session_state.get("secili_tf", "1H")
+        auto_scan = st.session_state.get("secili_auto_scan", False)
+        interval = st.session_state.get("secili_interval", 15)
+        matrix_count = st.session_state.get("secili_matrix_count", min(8, len(symbols)))
 
-    st.sidebar.markdown("### Üye Profili")
-    profile_name = st.sidebar.selectbox("Tarz", list(PROFILE_CONFIGS.keys()), index=1)
-    risk_mode = st.sidebar.selectbox("Risk Seviyesi", list(RISK_CONFIGS.keys()), index=1)
-    timeframe = st.sidebar.selectbox("Zaman Dilimi", ["1H", "4H", "1D", "1W"], index=0)
-    auto_scan = st.sidebar.checkbox("Otomatik yenile", value=False)
-    interval = st.sidebar.selectbox("Tarama periyodu (dk)", [5, 15, 30, 60], index=1)
-    matrix_count = st.sidebar.slider("Zaman matrisi sembol sayısı", 4, min(20, max(4, len(symbols))), min(8, len(symbols)))
+        st.sidebar.markdown("### Portföy Görünümü")
+        piyasa_gorunumu = st.sidebar.radio("Piyasa", ["ABD Portföyü", "TR (BIST) Portföyü"], index=0)
+        st.session_state["piyasa_gorunumu"] = piyasa_gorunumu
+        st.sidebar.markdown(f"**Aktif Profil:** {profile_name}")
+        st.sidebar.markdown(f"**Risk:** {risk_mode}")
+        st.sidebar.markdown(f"**TF:** {timeframe}")
+        if st.sidebar.button("Profili Düzenle", use_container_width=True):
+            st.session_state["profil_kilitli"] = False
+            st.rerun()
 
     summary = profile_summary(profile_name, risk_mode)
     st.sidebar.markdown("---")
     st.sidebar.markdown(
         f"""
         <div style="padding:12px 14px;border-radius:16px;background:rgba(15,23,42,0.65);border:1px solid rgba(148,163,184,0.10);">
-            <div style="color:#e2e8f0;font-weight:700;margin-bottom:6px;">Aktif Profil</div>
+            <div style="color:#e2e8f0;font-weight:700;margin-bottom:6px;">Aktif Profil Özeti</div>
             <div style="color:#94a3b8;font-size:0.88rem;line-height:1.5;">{summary['description']}<br>Min strength: %{summary['strength_min']}<br>Günlük fırsat: {summary['daily_target']}</div>
         </div>
         """,
@@ -1339,22 +1373,44 @@ def render_portfolio_tab(default_symbol: str) -> None:
         return
 
     rows = []
+    alert_rows = []
     for _, row in open_df.iterrows():
         raw = download_symbol(str(row["symbol"]), "1D")
         current_price = None
         pnl = None
         pnl_pct = None
         status = "İZLENİYOR"
+        action = "TUT"
+        alert = "Pozisyon izleniyor"
+        target_exit = None
+        protective_stop = None
+
         if not raw.empty:
             current_price = float(raw["Close"].iloc[-1])
             pnl = (current_price - float(row["entry_price"])) * float(row["quantity"])
             pnl_pct = ((current_price / float(row["entry_price"])) - 1) * 100 if float(row["entry_price"]) else None
-            if pnl_pct is not None and pnl_pct >= 3:
-                status = "TUT / TP YAKIN"
+            df_ind = add_indicators(raw)
+            last_atr = safe_float(df_ind["ATR14"].iloc[-1]) or 0.0
+            protective_stop = float(row["entry_price"]) - (1.5 * last_atr)
+            target_exit = float(row["entry_price"]) + (3.0 * last_atr)
+
+            if pnl_pct is not None and pnl_pct >= 4:
+                status = "KÂRDA"
+                action = "SATIŞ DÜŞÜN"
+                alert = "TP bölgesi yaklaşıyor, kâr realize edilebilir"
+            elif current_price is not None and protective_stop is not None and current_price <= protective_stop:
+                status = "RİSKLİ"
+                action = "ÇIK"
+                alert = "Koruyucu stop altı, çıkış değerlendir"
             elif pnl_pct is not None and pnl_pct <= -3:
-                status = "DİKKAT"
+                status = "ZAYIF"
+                action = "AZALT / DİKKAT"
+                alert = "Zarar artıyor, güç düşüşü izlenmeli"
             else:
-                status = "TUT"
+                status = "AKTİF"
+                action = "TUT"
+                alert = "Yapı korunuyor, pozisyon taşınabilir"
+
         rows.append({
             "ID": int(row["id"]),
             "Sembol": str(row["symbol"]),
@@ -1364,16 +1420,33 @@ def render_portfolio_tab(default_symbol: str) -> None:
             "PnL": "-" if pnl is None else format_price(pnl),
             "PnL %": "-" if pnl_pct is None else f"%{round(float(pnl_pct), 2)}",
             "Durum": status,
+            "Aksiyon": action,
+            "Stop": format_price(protective_stop) if protective_stop is not None else "-",
+            "Hedef Satış": format_price(target_exit) if target_exit is not None else "-",
             "Not": str(row["note"] or ""),
+        })
+        alert_rows.append({
+            "symbol": str(row["symbol"]),
+            "action": action,
+            "alert": alert,
+            "status": status,
         })
 
     table_df = pd.DataFrame(rows)
     st.dataframe(table_df.drop(columns=["ID"]), use_container_width=True, hide_index=True)
 
+    st.markdown("### Portföy Uyarıları")
+    for item in alert_rows:
+        color = "#22c55e" if item["action"] == "TUT" else "#f59e0b" if "SATIŞ" in item["action"] or "AZALT" in item["action"] else "#f43f5e"
+        st.markdown(
+            f"<div class='alert-item'><div class='alert-dot' style='background:{color};'></div><div><div class='signal-value' style='font-size:0.98rem; margin-bottom:0.2rem;'>{item['symbol']} · {item['action']}</div><div class='signal-note'>{item['alert']} · Durum: {item['status']}</div></div></div>",
+            unsafe_allow_html=True,
+        )
+
     st.markdown("#### Pozisyon Kapat")
-    close_cols = st.columns(min(3, len(rows)))
+    cols = st.columns(min(3, len(rows)))
     for idx, row in enumerate(rows[:3]):
-        with close_cols[idx]:
+        with cols[idx]:
             if st.button(f"{row['Sembol']} Kapat", key=f"close_pos_{row['ID']}", use_container_width=True):
                 close_portfolio_position(int(row["ID"]))
                 st.success(f"{row['Sembol']} kapatıldı.")
