@@ -1163,7 +1163,66 @@ def render_scan_overview(scan_df: pd.DataFrame) -> None:
     st.caption(f"En yüksek skorlu sembol: {best_symbol}")
 
 
+def render_scanner_table(scan_df: pd.DataFrame) -> None:
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1.2, 1, 1])
+    with c1:
+        search_term = st.text_input("Sembol ara", value="", placeholder="Örn: THYAO")
+    with c2:
+        verdict_filter = st.selectbox("Karar filtresi", ["Tümü", "GÜÇLÜ AL", "AL / İZLE", "İZLE", "SAT / İZLE", "GÜÇLÜ SAT"], index=0)
+    with c3:
+        min_strength = st.slider("Min güç %", 0, 100, 55)
+
+    filtered = scan_df.copy()
+    if search_term.strip():
+        filtered = filtered[filtered["Sembol"].str.contains(search_term.strip().upper(), na=False)]
+    if verdict_filter != "Tümü":
+        filtered = filtered[filtered["Karar"] == verdict_filter]
+    filtered = filtered[filtered["Güç %"] >= min_strength]
+
+    if filtered.empty:
+        st.info("Filtreye uygun sonuç yok.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    styled = filtered.copy()
+    styled["Fiyat"] = styled["Fiyat"].apply(lambda x: format_price(float(x)) if pd.notna(x) else "-")
+    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    top_hits = filtered.head(3)
+    cols = st.columns(3)
+    for idx, (_, row) in enumerate(top_hits.iterrows()):
+        with cols[idx]:
+            st.markdown(
+                f"""
+                <div class="signal-box">
+                    <div class="signal-head">Öne Çıkan Setup</div>
+                    <div class="signal-value">{row['Sembol']}</div>
+                    <div class="signal-note">Karar: <span style='color:{verdict_color(row['Karar'])};font-weight:700;'>{row['Karar']}</span><br>Güç: %{row['Güç %']} · OB: {row['OB']}<br>Likidite: {row['Likidite']}</div>
+                    <div class="mini-badge">TF {row['TF']} · MTF {row['MTF']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
 def render_history() -> None:
+    st.subheader("Geçmiş Sinyaller (SQLite)")
+    hist = load_recent_signals(150)
+    if hist.empty:
+        st.info("Henüz kayıt yok.")
+        return
+
+    st.dataframe(hist, use_container_width=True, hide_index=True)
+    st.download_button(
+        "Geçmişi CSV indir",
+        hist.to_csv(index=False).encode("utf-8-sig"),
+        file_name="signals_history.csv",
+        mime="text/csv",
+        use_container_width=False,
+    )() -> None:
     st.subheader("Geçmiş Sinyaller (SQLite)")
     hist = load_recent_signals(150)
     if hist.empty:
@@ -1241,9 +1300,27 @@ def main_streamlit() -> None:
     result_for_hero: Optional[AnalysisResult] = st.session_state.get("last_result")
     render_hero(result_for_hero, selected_symbol, timeframe)
 
-    tabs = st.tabs(["📊 Tekil Analiz", "🛰️ Tarama", "🧭 Zaman Matrisi", "🗃️ Geçmiş"])
+    with st.spinner("Scanner hazırlanıyor..."):
+        live_scan_df = scan_symbols(symbols, timeframe)
+
+    st.markdown("### Atlas Scanner")
+    if live_scan_df.empty:
+        st.info("Tarama sonucu bulunamadı.")
+    else:
+        render_scan_overview(live_scan_df)
+        render_scanner_table(live_scan_df)
+
+    tabs = st.tabs(["🛰️ Scanner", "📊 Grafik Analiz", "🧭 Zaman Matrisi", "🗃️ Geçmiş"])
 
     with tabs[0]:
+        st.subheader("Canlı Fırsat Masası")
+        if live_scan_df.empty:
+            st.info("Tarama sonucu bulunamadı.")
+        else:
+            render_scan_overview(live_scan_df)
+            render_scanner_table(live_scan_df)
+
+    with tabs[1]:
         if analyze_btn or "ran_once" not in st.session_state:
             st.session_state["ran_once"] = True
             df, result, err = analyze_symbol(selected_symbol, timeframe)
@@ -1262,16 +1339,8 @@ def main_streamlit() -> None:
                     st.info("Grafik için plotly kurulmalı.")
                 render_structure_panel(result)
                 st.markdown('<div class="footer-note">Bu analiz, teknik ve yapısal sinyalleri birleştirerek karar desteği üretir; yatırım tavsiyesi değildir.</div>', unsafe_allow_html=True)
-
-    with tabs[1]:
-        st.subheader("Tarama Sonuçları")
-        with st.spinner("Hisseler taranıyor..."):
-            scan_df = scan_symbols(symbols, timeframe)
-        if scan_df.empty:
-            st.info("Tarama sonucu bulunamadı.")
-        else:
-            render_scan_overview(scan_df)
-            st.dataframe(scan_df, use_container_width=True, hide_index=True)
+        elif result_for_hero is not None:
+            st.info("Son analiz görüntüleniyor. Farklı sembol için 'Analizi Çalıştır' butonuna bas.")
 
     with tabs[2]:
         st.subheader("Zaman Matrisi")
@@ -1289,7 +1358,7 @@ def main_streamlit() -> None:
 # ============================================================
 # CLI / TESTS
 # ============================================================
-def print_environment_help() -> None:
+def print_environment_help() -> None:() -> None:
     print(f"{APP_TITLE}")
     print("Bu dosya normalde Streamlit uygulaması olarak çalışır.")
     if not STREAMLIT_AVAILABLE:
@@ -1362,9 +1431,16 @@ class TestSmcApp(unittest.TestCase):
     def test_format_price_none(self):
         self.assertEqual(format_price(None), "-")
 
+    def test_extract_tv_symbol(self):
+        self.assertEqual(extract_tv_symbol("THYAO.IS"), "THYAO")
+
+    def test_universe_options_contains_bist30(self):
+        options = universe_options()
+        self.assertIn("BIST 30", options)
+        self.assertGreaterEqual(len(options["BIST 30"]), 30)
 
 
-def run_tests() -> int:
+def run_tests() -> int:() -> int:
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(TestSmcApp)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
