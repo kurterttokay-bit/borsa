@@ -1066,16 +1066,16 @@ def render_market_pulse(scan_df: pd.DataFrame) -> None:
     st.markdown(f"<div class='pulse-wrap'>{''.join(cards)}</div>", unsafe_allow_html=True)
 
 
-def render_scanner_table(scan_df: pd.DataFrame) -> Optional[str]:
+def render_scanner_table(scan_df: pd.DataFrame, key_prefix: str = "main") -> Optional[str]:
     c1, c2, c3, c4 = st.columns([1.1, 1.0, 1.0, 0.9])
     with c1:
-        search_term = st.text_input("Sembol ara", value="", placeholder="Örn: THYAO")
+        search_term = st.text_input("Sembol ara", value="", placeholder="Örn: THYAO", key=f"{key_prefix}_search_term")
     with c2:
-        verdict_filter = st.selectbox("Karar filtresi", ["Tümü", "GÜÇLÜ AL", "AL / İZLE", "İZLE", "SAT / İZLE", "GÜÇLÜ SAT"], index=0)
+        verdict_filter = st.selectbox("Karar filtresi", ["Tümü", "GÜÇLÜ AL", "AL / İZLE", "İZLE", "SAT / İZLE", "GÜÇLÜ SAT"], index=0, key=f"{key_prefix}_verdict_filter")
     with c3:
-        min_strength = st.slider("Min güç %", 0, 100, 55)
+        min_strength = st.slider("Min güç %", 0, 100, 55, key=f"{key_prefix}_min_strength")
     with c4:
-        quick_mode = st.selectbox("Quick filtre", ["Tümü", "Sadece Güçlüler", "Long Ağırlıklı", "Short Ağırlıklı"], index=0)
+        quick_mode = st.selectbox("Quick filtre", ["Tümü", "Sadece Güçlüler", "Long Ağırlıklı", "Short Ağırlıklı"], index=0, key=f"{key_prefix}_quick_mode")
 
     filtered = scan_df.copy()
     if search_term.strip():
@@ -1131,7 +1131,7 @@ def render_scanner_table(scan_df: pd.DataFrame) -> Optional[str]:
         with cols[0]:
             st.markdown(html, unsafe_allow_html=True)
         with cols[1]:
-            if st.button("Aç", key=f"pick_{row['Sembol']}_{i}", use_container_width=True):
+            if st.button("Aç", key=f"{key_prefix}_pick_{row['Sembol']}_{i}", use_container_width=True):
                 selected_symbol = str(row["Sembol"])
 
     top_hits = filtered.head(3)
@@ -1226,7 +1226,7 @@ def main_streamlit() -> None:
     else:
         render_market_pulse(live_scan_df)
         render_scan_overview(live_scan_df)
-        picked = render_scanner_table(live_scan_df)
+        picked = render_scanner_table(live_scan_df, key_prefix="top")
         if picked:
             st.session_state["selected_symbol"] = picked
             st.session_state["symbol_select_widget"] = picked
@@ -1242,7 +1242,7 @@ def main_streamlit() -> None:
         else:
             render_market_pulse(live_scan_df)
             render_scan_overview(live_scan_df)
-            picked_tab = render_scanner_table(live_scan_df)
+            picked_tab = render_scanner_table(live_scan_df, key_prefix="tab")
             if picked_tab:
                 st.session_state["selected_symbol"] = picked_tab
                 st.session_state["symbol_select_widget"] = picked_tab
