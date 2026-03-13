@@ -1222,7 +1222,7 @@ def render_history() -> None:
         file_name="signals_history.csv",
         mime="text/csv",
         use_container_width=False,
-    )() -> None:
+    () -> None:
     st.subheader("Geçmiş Sinyaller (SQLite)")
     hist = load_recent_signals(150)
     if hist.empty:
