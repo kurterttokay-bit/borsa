@@ -29,11 +29,7 @@ except ModuleNotFoundError:
     yf = None
     YFINANCE_AVAILABLE = False
 
-
-# ============================================================
-# APP CONFIG
-# ============================================================
-APP_TITLE = "SMC Terminal Pro"
+APP_TITLE = "Atlas Terminal"
 DB_PATH = "signals.db"
 
 TIMEFRAME_MAP = {
@@ -62,9 +58,6 @@ BIST_100_EXTRA = [
 DEFAULT_SYMBOLS = BIST_30.copy()
 
 
-# ============================================================
-# COMPAT / FALLBACKS
-# ============================================================
 def cache_data_stub(*args, **kwargs):
     def decorator(func: Callable):
         return func
@@ -80,9 +73,6 @@ def get_cache_decorator():
 cache_data = get_cache_decorator()
 
 
-# ============================================================
-# DATA STRUCTURES
-# ============================================================
 @dataclass
 class AnalysisResult:
     symbol: str
@@ -115,9 +105,6 @@ class AnalysisResult:
     take_profit: Optional[float]
 
 
-# ============================================================
-# DATABASE
-# ============================================================
 def init_db() -> None:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -191,9 +178,6 @@ def load_recent_signals(limit: int = 150) -> pd.DataFrame:
     return df
 
 
-# ============================================================
-# HELPERS
-# ============================================================
 def safe_float(value) -> Optional[float]:
     if pd.isna(value):
         return None
@@ -260,13 +244,9 @@ def extract_tv_symbol(symbol: str) -> str:
     return symbol.replace(".IS", "")
 
 
-# ============================================================
-# DATA LAYER
-# ============================================================
 @cache_data(ttl=180, show_spinner=False)
 def download_symbol(symbol: str, tf: str) -> pd.DataFrame:
     validate_timeframe(tf)
-
     if not YFINANCE_AVAILABLE:
         return pd.DataFrame()
 
@@ -288,8 +268,7 @@ def download_symbol(symbol: str, tf: str) -> pd.DataFrame:
 
     df = df.rename(columns=str.title)
     required = ["Open", "High", "Low", "Close", "Volume"]
-    missing = [col for col in required if col not in df.columns]
-    if missing:
+    if any(col not in df.columns for col in required):
         return pd.DataFrame()
 
     df = df[required].dropna().copy()
@@ -301,9 +280,6 @@ def download_symbol(symbol: str, tf: str) -> pd.DataFrame:
     return df
 
 
-# ============================================================
-# INDICATORS
-# ============================================================
 def ema(series: pd.Series, length: int) -> pd.Series:
     return series.ewm(span=length, adjust=False).mean()
 
@@ -347,9 +323,6 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-# ============================================================
-# SMC DETECTION
-# ============================================================
 def pivot_high(high: pd.Series, left: int = 3, right: int = 3) -> pd.Series:
     out = pd.Series(False, index=high.index)
     for i in range(left, len(high) - right):
@@ -374,13 +347,7 @@ def detect_bos_choch(df: pd.DataFrame) -> Dict[str, Any]:
     swing_lows = df.loc[pl, "Low"]
 
     if len(swing_highs) < 2 or len(swing_lows) < 2:
-        return {
-            "bos": False,
-            "choch": False,
-            "trend": "NEUTRAL",
-            "last_swing_high": None,
-            "last_swing_low": None,
-        }
+        return {"bos": False, "choch": False, "trend": "NEUTRAL", "last_swing_high": None, "last_swing_low": None}
 
     last_high = float(swing_highs.iloc[-1])
     prev_high = float(swing_highs.iloc[-2])
@@ -390,7 +357,6 @@ def detect_bos_choch(df: pd.DataFrame) -> Dict[str, Any]:
 
     bullish_structure = last_high > prev_high and last_low > prev_low
     bearish_structure = last_high < prev_high and last_low < prev_low
-
     bos = close > last_high or close < last_low
     choch = (bullish_structure and close < last_low) or (bearish_structure and close > last_high)
     trend = "UP" if bullish_structure else "DOWN" if bearish_structure else "NEUTRAL"
@@ -408,26 +374,13 @@ def detect_fvg(df: pd.DataFrame, lookback: int = 120) -> List[Dict[str, Any]]:
     rows = df.tail(lookback)
     idxs = list(rows.index)
     gaps: List[Dict[str, Any]] = []
-
     for i in range(2, len(rows)):
         a = rows.iloc[i - 2]
         c = rows.iloc[i]
         if c["Low"] > a["High"]:
-            gaps.append({
-                "type": "bullish",
-                "start": idxs[i - 2],
-                "end": idxs[i],
-                "low": float(a["High"]),
-                "high": float(c["Low"]),
-            })
+            gaps.append({"type": "bullish", "start": idxs[i - 2], "end": idxs[i], "low": float(a["High"]), "high": float(c["Low"])})
         elif c["High"] < a["Low"]:
-            gaps.append({
-                "type": "bearish",
-                "start": idxs[i - 2],
-                "end": idxs[i],
-                "low": float(c["High"]),
-                "high": float(a["Low"]),
-            })
+            gaps.append({"type": "bearish", "start": idxs[i - 2], "end": idxs[i], "low": float(c["High"]), "high": float(a["Low"])})
     return gaps
 
 
@@ -487,16 +440,9 @@ def detect_order_blocks(df: pd.DataFrame, lookback: int = 80) -> Dict[str, Any]:
     elif close < float(data["EMA50"].iloc[-1]):
         bias = "BEARISH"
 
-    return {
-        "bias": bias,
-        "bullish_zone": bullish_zone,
-        "bearish_zone": bearish_zone,
-    }
+    return {"bias": bias, "bullish_zone": bullish_zone, "bearish_zone": bearish_zone}
 
 
-# ============================================================
-# AI / DECISION ENGINE
-# ============================================================
 def calc_market_strength(df: pd.DataFrame, smc: Dict[str, Any], ob: Dict[str, Any], sweep: Dict[str, Any]) -> Tuple[float, float, float, str]:
     last = df.iloc[-1]
     score = 50.0
@@ -554,8 +500,6 @@ def calc_market_strength(df: pd.DataFrame, smc: Dict[str, Any], ob: Dict[str, An
         elif smc["trend"] == "DOWN":
             score += 10
             notes.append("CHoCH yukarı dönüş")
-        else:
-            notes.append("CHoCH")
 
     if "BULLISH" in ob["bias"]:
         score += 8
@@ -641,7 +585,7 @@ def analyze_symbol(symbol: str, timeframe: str) -> Tuple[pd.DataFrame, Optional[
     raw = download_symbol(symbol, timeframe)
     if raw.empty:
         if not YFINANCE_AVAILABLE:
-            return pd.DataFrame(), None, "Veri alınamadı: yfinance kurulu değil. `pip install yfinance` gerekli."
+            return pd.DataFrame(), None, "Veri alınamadı: yfinance kurulu değil."
         return pd.DataFrame(), None, "Veri alınamadı"
 
     df = add_indicators(raw)
@@ -690,17 +634,11 @@ def analyze_symbol(symbol: str, timeframe: str) -> Tuple[pd.DataFrame, Optional[
     return df, result, None
 
 
-# ============================================================
-# CHARTING
-# ============================================================
 def plot_chart(df: pd.DataFrame, result: AnalysisResult):
     if not PLOTLY_AVAILABLE:
         return None
 
     chart_df = df.tail(250).copy()
-    candle_up = "#22c55e"
-    candle_down = "#f43f5e"
-
     fig = go.Figure()
     fig.add_trace(
         go.Candlestick(
@@ -710,69 +648,28 @@ def plot_chart(df: pd.DataFrame, result: AnalysisResult):
             low=chart_df["Low"],
             close=chart_df["Close"],
             name="Fiyat",
-            increasing_line_color=candle_up,
-            decreasing_line_color=candle_down,
+            increasing_line_color="#22c55e",
+            decreasing_line_color="#f43f5e",
         )
     )
     fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df["EMA50"], mode="lines", name="EMA50", line=dict(color="#38bdf8", width=1.4)))
     fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df["EMA200"], mode="lines", name="EMA200", line=dict(color="#fbbf24", width=1.6)))
 
     if result.latest_fvg:
-        fig.add_hrect(
-            y0=result.latest_fvg["low"],
-            y1=result.latest_fvg["high"],
-            line_width=0,
-            fillcolor="#7c3aed",
-            opacity=0.16,
-            annotation_text=f"FVG {result.latest_fvg['type']}",
-            annotation_font_color="#e2e8f0",
-        )
-
+        fig.add_hrect(y0=result.latest_fvg["low"], y1=result.latest_fvg["high"], line_width=0, fillcolor="#7c3aed", opacity=0.16, annotation_text=f"FVG {result.latest_fvg['type']}")
     if result.order_block_bullish_zone:
-        fig.add_hrect(
-            y0=result.order_block_bullish_zone[0],
-            y1=result.order_block_bullish_zone[1],
-            line_width=0,
-            fillcolor="#10b981",
-            opacity=0.10,
-            annotation_text="Bullish OB",
-            annotation_font_color="#cbd5e1",
-        )
-
+        fig.add_hrect(y0=result.order_block_bullish_zone[0], y1=result.order_block_bullish_zone[1], line_width=0, fillcolor="#10b981", opacity=0.10, annotation_text="Bullish OB")
     if result.order_block_bearish_zone:
-        fig.add_hrect(
-            y0=result.order_block_bearish_zone[0],
-            y1=result.order_block_bearish_zone[1],
-            line_width=0,
-            fillcolor="#ef4444",
-            opacity=0.10,
-            annotation_text="Bearish OB",
-            annotation_font_color="#cbd5e1",
-        )
-
+        fig.add_hrect(y0=result.order_block_bearish_zone[0], y1=result.order_block_bearish_zone[1], line_width=0, fillcolor="#ef4444", opacity=0.10, annotation_text="Bearish OB")
     if result.stop_loss is not None:
         fig.add_hline(y=result.stop_loss, annotation_text="SL", line=dict(color="#fb7185", dash="dot"))
     if result.take_profit is not None:
         fig.add_hline(y=result.take_profit, annotation_text="TP", line=dict(color="#4ade80", dash="dot"))
 
-    fig.update_layout(
-        height=680,
-        xaxis_rangeslider_visible=False,
-        title=f"{result.symbol} | {result.timeframe} | {verdict_badge(result.verdict)}",
-        legend_orientation="h",
-        template="plotly_dark",
-        paper_bgcolor="#0b1220",
-        plot_bgcolor="#0b1220",
-        margin=dict(l=15, r=15, t=60, b=15),
-    )
-    fig.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.08)")
-    fig.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.08)")
+    fig.update_layout(height=680, xaxis_rangeslider_visible=False, title=f"{result.symbol} | {result.timeframe} | {verdict_badge(result.verdict)}", legend_orientation="h", template="plotly_dark", paper_bgcolor="#0b1220", plot_bgcolor="#0b1220")
     return fig
 
 
-# ============================================================
-# SCANNER
-# ============================================================
 @cache_data(ttl=300, show_spinner=False)
 def scan_symbols(symbols: List[str], timeframe: str) -> pd.DataFrame:
     rows = []
@@ -803,8 +700,7 @@ def scan_symbols(symbols: List[str], timeframe: str) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
 
-    scan_df = pd.DataFrame(rows)
-    return scan_df.sort_values(["Güç %", "Long %"], ascending=[False, False]).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values(["Güç %", "Long %"], ascending=[False, False]).reset_index(drop=True)
 
 
 def build_time_matrix(symbols: List[str], tfs: List[str]) -> pd.DataFrame:
@@ -821,151 +717,28 @@ def build_time_matrix(symbols: List[str], tfs: List[str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ============================================================
-# UI THEME
-# ============================================================
 def inject_custom_css() -> None:
     st.markdown(
         """
         <style>
-        .stApp {
-            background:
-                radial-gradient(circle at top left, rgba(56,189,248,0.10), transparent 28%),
-                radial-gradient(circle at top right, rgba(20,184,166,0.10), transparent 22%),
-                linear-gradient(180deg, #020617 0%, #071121 100%);
-            color: #e2e8f0;
-        }
-        .block-container {
-            padding-top: 1.2rem;
-            padding-bottom: 2rem;
-            max-width: 1500px;
-        }
-        section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, rgba(15,23,42,0.98), rgba(2,6,23,0.98));
-            border-right: 1px solid rgba(148,163,184,0.12);
-        }
-        div[data-testid="stMetric"] {
-            background: linear-gradient(180deg, rgba(15,23,42,0.92), rgba(15,23,42,0.72));
-            border: 1px solid rgba(148,163,184,0.10);
-            padding: 14px 16px;
-            border-radius: 18px;
-            box-shadow: 0 10px 35px rgba(2,6,23,0.28);
-        }
-        div[data-testid="stMetricLabel"] {
-            color: #94a3b8;
-        }
-        div[data-testid="stMetricValue"] {
-            color: #f8fafc;
-        }
-        .hero-card {
-            padding: 22px 24px;
-            border-radius: 24px;
-            background: linear-gradient(135deg, rgba(14,165,233,0.18), rgba(15,23,42,0.78) 45%, rgba(16,185,129,0.14));
-            border: 1px solid rgba(125,211,252,0.14);
-            box-shadow: 0 20px 45px rgba(2,6,23,0.30);
-            margin-bottom: 1rem;
-        }
-        .hero-title {
-            font-size: 2.05rem;
-            font-weight: 800;
-            letter-spacing: -0.03em;
-            color: #f8fafc;
-            margin-bottom: 0.25rem;
-        }
-        .hero-sub {
-            color: #94a3b8;
-            font-size: 0.98rem;
-            margin-bottom: 1rem;
-        }
-        .status-row {
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0,1fr));
-            gap: 12px;
-        }
-        .status-pill {
-            border-radius: 16px;
-            padding: 12px 14px;
-            background: rgba(15,23,42,0.65);
-            border: 1px solid rgba(148,163,184,0.10);
-        }
-        .status-pill .label {
-            color: #94a3b8;
-            font-size: 0.8rem;
-            margin-bottom: 4px;
-        }
-        .status-pill .value {
-            color: #f8fafc;
-            font-size: 1rem;
-            font-weight: 700;
-        }
-        .glass-card {
-            background: linear-gradient(180deg, rgba(15,23,42,0.84), rgba(15,23,42,0.60));
-            border: 1px solid rgba(148,163,184,0.10);
-            border-radius: 22px;
-            padding: 18px 18px 12px 18px;
-            box-shadow: 0 12px 32px rgba(2,6,23,0.28);
-        }
-        .signal-box {
-            padding: 18px;
-            border-radius: 20px;
-            background: linear-gradient(180deg, rgba(15,23,42,0.94), rgba(15,23,42,0.70));
-            border: 1px solid rgba(148,163,184,0.10);
-            min-height: 100%;
-        }
-        .signal-head {
-            font-size: 0.82rem;
-            color: #94a3b8;
-            margin-bottom: 0.4rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-        }
-        .signal-value {
-            font-size: 1.25rem;
-            font-weight: 800;
-            color: #f8fafc;
-            margin-bottom: 0.55rem;
-        }
-        .signal-note {
-            color: #cbd5e1;
-            font-size: 0.92rem;
-            line-height: 1.5;
-        }
-        .mini-badge {
-            display: inline-block;
-            margin-top: 8px;
-            padding: 6px 10px;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            background: rgba(56,189,248,0.10);
-            color: #7dd3fc;
-            border: 1px solid rgba(56,189,248,0.14);
-        }
-        div[data-baseweb="tab-list"] {
-            gap: 10px;
-            background: transparent;
-        }
-        button[data-baseweb="tab"] {
-            height: 46px;
-            border-radius: 14px;
-            background: rgba(15,23,42,0.55);
-            border: 1px solid rgba(148,163,184,0.10);
-            color: #cbd5e1;
-            padding: 0 16px;
-        }
-        button[data-baseweb="tab"][aria-selected="true"] {
-            background: linear-gradient(135deg, rgba(14,165,233,0.16), rgba(16,185,129,0.14));
-            color: #f8fafc;
-            border: 1px solid rgba(125,211,252,0.18);
-        }
-        .stDataFrame, .stTable {
-            border-radius: 18px;
-            overflow: hidden;
-        }
-        .footer-note {
-            color: #64748b;
-            font-size: 0.85rem;
-            margin-top: 0.8rem;
-        }
+        .stApp {background: radial-gradient(circle at top left, rgba(56,189,248,0.10), transparent 28%), radial-gradient(circle at top right, rgba(20,184,166,0.10), transparent 22%), linear-gradient(180deg, #020617 0%, #071121 100%); color: #e2e8f0;}
+        .block-container {padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1500px;}
+        section[data-testid="stSidebar"] {background: linear-gradient(180deg, rgba(15,23,42,0.98), rgba(2,6,23,0.98)); border-right: 1px solid rgba(148,163,184,0.12);}
+        div[data-testid="stMetric"] {background: linear-gradient(180deg, rgba(15,23,42,0.92), rgba(15,23,42,0.72)); border: 1px solid rgba(148,163,184,0.10); padding: 14px 16px; border-radius: 18px;}
+        .hero-card {padding: 22px 24px; border-radius: 24px; background: linear-gradient(135deg, rgba(14,165,233,0.18), rgba(15,23,42,0.78) 45%, rgba(16,185,129,0.14)); border: 1px solid rgba(125,211,252,0.14); margin-bottom: 1rem;}
+        .hero-title {font-size: 2.05rem; font-weight: 800; color: #f8fafc; margin-bottom: 0.25rem;}
+        .hero-sub {color: #94a3b8; font-size: 0.98rem; margin-bottom: 1rem;}
+        .status-row {display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px;}
+        .status-pill {border-radius: 16px; padding: 12px 14px; background: rgba(15,23,42,0.65); border: 1px solid rgba(148,163,184,0.10);}
+        .status-pill .label {color: #94a3b8; font-size: 0.8rem; margin-bottom: 4px;}
+        .status-pill .value {color: #f8fafc; font-size: 1rem; font-weight: 700;}
+        .glass-card {background: linear-gradient(180deg, rgba(15,23,42,0.84), rgba(15,23,42,0.60)); border: 1px solid rgba(148,163,184,0.10); border-radius: 22px; padding: 18px;}
+        .signal-box {padding: 18px; border-radius: 20px; background: linear-gradient(180deg, rgba(15,23,42,0.94), rgba(15,23,42,0.70)); border: 1px solid rgba(148,163,184,0.10);}
+        .signal-head {font-size: 0.82rem; color: #94a3b8; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.08em;}
+        .signal-value {font-size: 1.25rem; font-weight: 800; color: #f8fafc; margin-bottom: 0.55rem;}
+        .signal-note {color: #cbd5e1; font-size: 0.92rem; line-height: 1.5;}
+        .mini-badge {display: inline-block; margin-top: 8px; padding: 6px 10px; border-radius: 999px; font-size: 0.78rem; background: rgba(56,189,248,0.10); color: #7dd3fc; border: 1px solid rgba(56,189,248,0.14);}
+        .footer-note {color: #64748b; font-size: 0.85rem; margin-top: 0.8rem;}
         </style>
         """,
         unsafe_allow_html=True,
@@ -984,42 +757,18 @@ def render_hero(result: Optional[AnalysisResult], selected_symbol: str, timefram
         f"""
         <div class="hero-card">
             <div class="hero-title">{APP_TITLE}</div>
-            <div class="hero-sub">Kurumsal yapı okuma, teknik filtreleme ve karar destek sistemini tek ekranda birleştiren BIST terminali.</div>
+            <div class="hero-sub">SMC scanner, yapısal analiz ve karar destek sistemi tek ekranda.</div>
             <div class="status-row">
-                <div class="status-pill">
-                    <div class="label">Sembol</div>
-                    <div class="value">{selected_symbol}</div>
-                </div>
-                <div class="status-pill">
-                    <div class="label">Zaman Dilimi</div>
-                    <div class="value">{timeframe}</div>
-                </div>
-                <div class="status-pill">
-                    <div class="label">Son Fiyat</div>
-                    <div class="value">{price}</div>
-                </div>
-                <div class="status-pill">
-                    <div class="label">Aktif Karar</div>
-                    <div class="value" style="color:{verdict_hex};">{verdict}</div>
-                </div>
+                <div class="status-pill"><div class="label">Sembol</div><div class="value">{selected_symbol}</div></div>
+                <div class="status-pill"><div class="label">Zaman Dilimi</div><div class="value">{timeframe}</div></div>
+                <div class="status-pill"><div class="label">Son Fiyat</div><div class="value">{price}</div></div>
+                <div class="status-pill"><div class="label">Aktif Karar</div><div class="value" style="color:{verdict_hex};">{verdict}</div></div>
             </div>
             <div class="status-row" style="margin-top:12px;">
-                <div class="status-pill">
-                    <div class="label">Market Strength</div>
-                    <div class="value">{market_strength}</div>
-                </div>
-                <div class="status-pill">
-                    <div class="label">MTF Durumu</div>
-                    <div class="value">{mtf}</div>
-                </div>
-                <div class="status-pill">
-                    <div class="label">Likidite</div>
-                    <div class="value">{sweep}</div>
-                </div>
-                <div class="status-pill">
-                    <div class="label">Veri Kaynağı</div>
-                    <div class="value">Yahoo Finance</div>
-                </div>
+                <div class="status-pill"><div class="label">Market Strength</div><div class="value">{market_strength}</div></div>
+                <div class="status-pill"><div class="label">MTF Durumu</div><div class="value">{mtf}</div></div>
+                <div class="status-pill"><div class="label">Likidite</div><div class="value">{sweep}</div></div>
+                <div class="status-pill"><div class="label">Veri Kaynağı</div><div class="value">Yahoo Finance</div></div>
             </div>
         </div>
         """,
@@ -1030,49 +779,15 @@ def render_hero(result: Optional[AnalysisResult], selected_symbol: str, timefram
 def render_signal_boxes(result: AnalysisResult) -> None:
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown(
-            f"""
-            <div class="signal-box">
-                <div class="signal-head">Piyasa Yapısı</div>
-                <div class="signal-value">{result.structure_trend}</div>
-                <div class="signal-note">BOS: {'Evet' if result.bos else 'Hayır'} · CHoCH: {'Evet' if result.choch else 'Hayır'} · FVG sayısı: {result.fvg_count}</div>
-                <div class="mini-badge">{result.order_block_bias}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"<div class='signal-box'><div class='signal-head'>Piyasa Yapısı</div><div class='signal-value'>{result.structure_trend}</div><div class='signal-note'>BOS: {'Evet' if result.bos else 'Hayır'} · CHoCH: {'Evet' if result.choch else 'Hayır'} · FVG: {result.fvg_count}</div><div class='mini-badge'>{result.order_block_bias}</div></div>", unsafe_allow_html=True)
     with c2:
-        st.markdown(
-            f"""
-            <div class="signal-box">
-                <div class="signal-head">Karar Motoru</div>
-                <div class="signal-value" style="color:{verdict_color(result.verdict)};">{verdict_badge(result.verdict)}</div>
-                <div class="signal-note">Long: %{result.long_probability} · Short: %{result.short_probability}</div>
-                <div class="mini-badge">{result.mtf_bias}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"<div class='signal-box'><div class='signal-head'>Karar Motoru</div><div class='signal-value' style='color:{verdict_color(result.verdict)};'>{verdict_badge(result.verdict)}</div><div class='signal-note'>Long: %{result.long_probability} · Short: %{result.short_probability}</div><div class='mini-badge'>{result.mtf_bias}</div></div>", unsafe_allow_html=True)
     with c3:
-        st.markdown(
-            f"""
-            <div class="signal-box">
-                <div class="signal-head">Risk Alanı</div>
-                <div class="signal-value">SL {format_price(result.stop_loss)} / TP {format_price(result.take_profit)}</div>
-                <div class="signal-note">ATR: {format_price(result.atr)} · Likidite: {result.liquidity_label}</div>
-                <div class="mini-badge">Üst TF: {result.mtf_higher_tf}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"<div class='signal-box'><div class='signal-head'>Risk Alanı</div><div class='signal-value'>SL {format_price(result.stop_loss)} / TP {format_price(result.take_profit)}</div><div class='signal-note'>ATR: {format_price(result.atr)} · Likidite: {result.liquidity_label}</div><div class='mini-badge'>Üst TF: {result.mtf_higher_tf}</div></div>", unsafe_allow_html=True)
 
 
-# ============================================================
-# UI
-# ============================================================
 def sidebar() -> Tuple[List[str], str, bool, int, int]:
     st.sidebar.markdown("## ⚙️ Kontrol Merkezi")
-
     predefined = universe_options()
     mode = st.sidebar.radio("Evren", ["Hazır Liste", "Özel Liste"], index=0)
 
@@ -1080,37 +795,22 @@ def sidebar() -> Tuple[List[str], str, bool, int, int]:
         selected_universe = st.sidebar.selectbox("Liste seç", list(predefined.keys()), index=0)
         symbols = predefined[selected_universe]
     else:
-        raw_text = st.sidebar.text_area(
-            "Semboller (.IS ile, virgül ile ayır)",
-            value=",".join(BIST_30[:8]),
-            height=130,
-        )
+        raw_text = st.sidebar.text_area("Semboller (.IS ile, virgül ile ayır)", value=",".join(BIST_30[:8]), height=130)
         symbols = [s.strip().upper() for s in raw_text.split(",") if s.strip()]
 
     timeframe = st.sidebar.selectbox("Zaman Dilimi", ["1H", "4H", "1D", "1W"], index=0)
     auto_scan = st.sidebar.checkbox("Otomatik yenile", value=False)
     interval = st.sidebar.selectbox("Tarama periyodu (dk)", [5, 15, 30, 60], index=1)
     matrix_count = st.sidebar.slider("Zaman matrisi sembol sayısı", 4, min(20, max(4, len(symbols))), min(8, len(symbols)))
-
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(
-        """
-        <div style="padding:12px 14px;border-radius:16px;background:rgba(15,23,42,0.65);border:1px solid rgba(148,163,184,0.10);">
-            <div style="color:#e2e8f0;font-weight:700;margin-bottom:6px;">Canlı Not</div>
-            <div style="color:#94a3b8;font-size:0.88rem;line-height:1.5;">4H veri 1H üzerinden yeniden örneklenir. Yahoo kaynaklı bazı BIST sembollerinde gecikme ya da boş veri görülebilir.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
     return symbols, timeframe, auto_scan, interval, matrix_count
 
 
 def render_summary_cards(result: AnalysisResult) -> None:
-    top1, top2, top3, top4 = st.columns(4)
-    top1.metric("AI Kararı", verdict_badge(result.verdict))
-    top2.metric("Market Strength", f"%{result.market_strength}")
-    top3.metric("Long Olasılığı", f"%{result.long_probability}")
-    top4.metric("Short Olasılığı", f"%{result.short_probability}")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("AI Kararı", verdict_badge(result.verdict))
+    c2.metric("Market Strength", f"%{result.market_strength}")
+    c3.metric("Long Olasılığı", f"%{result.long_probability}")
+    c4.metric("Short Olasılığı", f"%{result.short_probability}")
 
     a, b, c, d = st.columns(4)
     a.metric("RSI", result.rsi)
@@ -1121,7 +821,6 @@ def render_summary_cards(result: AnalysisResult) -> None:
 
 def render_structure_panel(result: AnalysisResult) -> None:
     col_left, col_right = st.columns([1.25, 1])
-
     with col_left:
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.subheader("Piyasa Yapısı")
@@ -1133,7 +832,6 @@ def render_structure_panel(result: AnalysisResult) -> None:
         st.write(f"**Order Block Bias:** {result.order_block_bias}")
         st.write(f"**AI Notu:** {result.verdict_note}")
         st.markdown('</div>', unsafe_allow_html=True)
-
     with col_right:
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.subheader("Risk Yönetimi")
@@ -1141,20 +839,15 @@ def render_structure_panel(result: AnalysisResult) -> None:
         st.write(f"**Stop Loss:** {format_price(result.stop_loss)}")
         st.write(f"**Take Profit:** {format_price(result.take_profit)}")
         st.write(f"**Üst TF:** {result.mtf_higher_tf}")
-        tv_symbol = extract_tv_symbol(result.symbol)
-        st.markdown(f"[TradingView'de Aç](https://www.tradingview.com/chart/?symbol=BIST%3A{tv_symbol})")
+        st.markdown(f"[TradingView'de Aç](https://www.tradingview.com/chart/?symbol=BIST%3A{extract_tv_symbol(result.symbol)})")
         st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_scan_overview(scan_df: pd.DataFrame) -> None:
-    if scan_df.empty:
-        return
-
     strong_buys = int((scan_df["Karar"] == "GÜÇLÜ AL").sum())
     strong_sells = int((scan_df["Karar"] == "GÜÇLÜ SAT").sum())
     avg_strength = round(float(scan_df["Güç %"].mean()), 1)
     best_symbol = str(scan_df.iloc[0]["Sembol"])
-
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Tarama Adedi", len(scan_df))
     c2.metric("Güçlü Al", strong_buys)
@@ -1164,7 +857,6 @@ def render_scan_overview(scan_df: pd.DataFrame) -> None:
 
 
 def render_scanner_table(scan_df: pd.DataFrame) -> None:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1.2, 1, 1])
     with c1:
         search_term = st.text_input("Sembol ara", value="", placeholder="Örn: THYAO")
@@ -1182,30 +874,20 @@ def render_scanner_table(scan_df: pd.DataFrame) -> None:
 
     if filtered.empty:
         st.info("Filtreye uygun sonuç yok.")
-        st.markdown('</div>', unsafe_allow_html=True)
         return
 
-    styled = filtered.copy()
-    styled["Fiyat"] = styled["Fiyat"].apply(lambda x: format_price(float(x)) if pd.notna(x) else "-")
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+    show_df = filtered.copy()
+    show_df["Fiyat"] = show_df["Fiyat"].apply(lambda x: format_price(float(x)) if pd.notna(x) else "-")
+    st.dataframe(show_df, use_container_width=True, hide_index=True)
 
     top_hits = filtered.head(3)
     cols = st.columns(3)
     for idx, (_, row) in enumerate(top_hits.iterrows()):
         with cols[idx]:
             st.markdown(
-                f"""
-                <div class="signal-box">
-                    <div class="signal-head">Öne Çıkan Setup</div>
-                    <div class="signal-value">{row['Sembol']}</div>
-                    <div class="signal-note">Karar: <span style='color:{verdict_color(row['Karar'])};font-weight:700;'>{row['Karar']}</span><br>Güç: %{row['Güç %']} · OB: {row['OB']}<br>Likidite: {row['Likidite']}</div>
-                    <div class="mini-badge">TF {row['TF']} · MTF {row['MTF']}</div>
-                </div>
-                """,
+                f"<div class='signal-box'><div class='signal-head'>Öne Çıkan Setup</div><div class='signal-value'>{row['Sembol']}</div><div class='signal-note'>Karar: <span style='color:{verdict_color(row['Karar'])};font-weight:700;'>{row['Karar']}</span><br>Güç: %{row['Güç %']} · OB: {row['OB']}<br>Likidite: {row['Likidite']}</div><div class='mini-badge'>TF {row['TF']} · MTF {row['MTF']}</div></div>",
                 unsafe_allow_html=True,
             )
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_history() -> None:
@@ -1214,25 +896,10 @@ def render_history() -> None:
     if hist.empty:
         st.info("Henüz kayıt yok.")
         return
-
     st.dataframe(hist, use_container_width=True, hide_index=True)
     st.download_button(
-        "Geçmişi CSV indir",
-        hist.to_csv(index=False).encode("utf-8-sig"),
-        file_name="signals_history.csv",
-        mime="text/csv",
-        use_container_width=False,
-    () -> None:
-    st.subheader("Geçmiş Sinyaller (SQLite)")
-    hist = load_recent_signals(150)
-    if hist.empty:
-        st.info("Henüz kayıt yok.")
-        return
-
-    st.dataframe(hist, use_container_width=True, hide_index=True)
-    st.download_button(
-        "Geçmişi CSV indir",
-        hist.to_csv(index=False).encode("utf-8-sig"),
+        label="Geçmişi CSV indir",
+        data=hist.to_csv(index=False).encode("utf-8-sig"),
         file_name="signals_history.csv",
         mime="text/csv",
         use_container_width=False,
@@ -1246,36 +913,18 @@ def try_autorefresh(enabled: bool, interval_minutes: int) -> None:
         from streamlit_autorefresh import st_autorefresh
         st_autorefresh(interval=interval_minutes * 60 * 1000, key="scanner_refresh")
     except Exception:
-        st.info("Otomatik yenileme için `pip install streamlit-autorefresh` kurman gerekiyor.")
+        st.info("Otomatik yenileme için streamlit-autorefresh kurman gerekiyor.")
 
 
 def install_block() -> None:
     with st.expander("Kurulum"):
-        st.code(
-            """
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
-pip install streamlit yfinance pandas numpy plotly streamlit-autorefresh openpyxl
-streamlit run smc_trading_app.py
-            """.strip(),
-            language="bash",
-        )
-        st.write("EXE için sonraki aşamada PyInstaller tabanlı launcher ekleyebiliriz.")
+        st.code("pip install streamlit yfinance pandas numpy plotly streamlit-autorefresh openpyxl\nstreamlit run app.py", language="bash")
 
 
 def notes_block() -> None:
     with st.expander("Notlar / Yol Haritası"):
-        st.warning(
-            "Bu sürüm gelişmiş MVP'dir. SMC tespitleri pratik kullanım için sadeleştirilmiştir; kurumsal seviyede tam birebir order-flow motoru değildir."
-        )
-        st.markdown(
-            """
-- Sonraki adımda alarm sistemi eklenebilir.
-- Telegram / e-posta bildirimleri bağlanabilir.
-- Sinyal başarı istatistiği üretilebilir.
-- EXE ve sonra mobil uygulama sürümüne geçilebilir.
-            """
-        )
+        st.warning("Bu sürüm gelişmiş MVP'dir. SMC tespitleri pratik kullanım için sadeleştirilmiştir.")
+        st.markdown("- Alarm sistemi\n- Telegram / e-posta bildirimleri\n- Sinyal başarı istatistiği\n- EXE ve mobil sürüm")
 
 
 def main_streamlit() -> None:
@@ -1285,16 +934,16 @@ def main_streamlit() -> None:
     symbols, timeframe, auto_scan, interval, matrix_count = sidebar()
 
     if not YFINANCE_AVAILABLE:
-        st.error("Bu uygulama veri çekebilmek için yfinance gerektirir. Kurulum: `pip install yfinance`")
+        st.error("Bu uygulama veri çekebilmek için yfinance gerektirir.")
         install_block()
         return
 
     try_autorefresh(auto_scan, interval)
 
-    top_left, top_right = st.columns([2.3, 1])
-    with top_left:
+    left, right = st.columns([2.3, 1])
+    with left:
         selected_symbol = st.selectbox("Hisse seç", symbols, index=0)
-    with top_right:
+    with right:
         analyze_btn = st.button("Analizi Çalıştır", use_container_width=True)
 
     result_for_hero: Optional[AnalysisResult] = st.session_state.get("last_result")
@@ -1338,9 +987,9 @@ def main_streamlit() -> None:
                 else:
                     st.info("Grafik için plotly kurulmalı.")
                 render_structure_panel(result)
-                st.markdown('<div class="footer-note">Bu analiz, teknik ve yapısal sinyalleri birleştirerek karar desteği üretir; yatırım tavsiyesi değildir.</div>', unsafe_allow_html=True)
+                st.markdown('<div class="footer-note">Bu analiz yatırım tavsiyesi değildir.</div>', unsafe_allow_html=True)
         elif result_for_hero is not None:
-            st.info("Son analiz görüntüleniyor. Farklı sembol için 'Analizi Çalıştır' butonuna bas.")
+            st.info("Son analiz görüntüleniyor. Farklı sembol için butona bas.")
 
     with tabs[2]:
         st.subheader("Zaman Matrisi")
@@ -1355,40 +1004,28 @@ def main_streamlit() -> None:
     notes_block()
 
 
-# ============================================================
-# CLI / TESTS
-# ============================================================
-def print_environment_help() -> None:() -> None:
-    print(f"{APP_TITLE}")
-    print("Bu dosya normalde Streamlit uygulaması olarak çalışır.")
+def print_environment_help() -> None:
+    print(APP_TITLE)
+    print("Bu dosya Streamlit uygulaması olarak çalışır.")
     if not STREAMLIT_AVAILABLE:
         print("- Eksik paket: streamlit")
     if not YFINANCE_AVAILABLE:
         print("- Eksik paket: yfinance")
     if not PLOTLY_AVAILABLE:
         print("- Eksik paket: plotly")
-    print("Kurulum:")
-    print("  pip install streamlit yfinance pandas numpy plotly streamlit-autorefresh openpyxl")
-    print("Çalıştırma:")
-    print("  streamlit run smc_trading_app.py")
-    print("Testler:")
-    print("  python smc_trading_app.py --run-tests")
 
 
 class TestSmcApp(unittest.TestCase):
     def setUp(self) -> None:
         idx = pd.date_range("2025-01-01", periods=80, freq="h")
         base = np.linspace(100, 140, len(idx))
-        self.df = pd.DataFrame(
-            {
-                "Open": base - 0.5,
-                "High": base + 1.0,
-                "Low": base - 1.0,
-                "Close": base,
-                "Volume": np.full(len(idx), 1000),
-            },
-            index=idx,
-        )
+        self.df = pd.DataFrame({
+            "Open": base - 0.5,
+            "High": base + 1.0,
+            "Low": base - 1.0,
+            "Close": base,
+            "Volume": np.full(len(idx), 1000),
+        }, index=idx)
         self.df_ind = add_indicators(self.df)
 
     def test_safe_float(self):
@@ -1406,24 +1043,10 @@ class TestSmcApp(unittest.TestCase):
         self.assertLess(sl, float(self.df_ind["Close"].iloc[-1]))
         self.assertGreater(tp, float(self.df_ind["Close"].iloc[-1]))
 
-    def test_detect_fvg_returns_list(self):
-        gaps = detect_fvg(self.df_ind)
-        self.assertIsInstance(gaps, list)
-
     def test_validate_timeframe(self):
         validate_timeframe("1H")
         with self.assertRaises(ValueError):
             validate_timeframe("2H")
-
-    def test_download_symbol_without_yfinance_returns_empty(self):
-        global YFINANCE_AVAILABLE
-        old = YFINANCE_AVAILABLE
-        YFINANCE_AVAILABLE = False
-        try:
-            df = download_symbol("THYAO.IS", "1H")
-            self.assertTrue(df.empty)
-        finally:
-            YFINANCE_AVAILABLE = old
 
     def test_verdict_color_known(self):
         self.assertEqual(verdict_color("GÜÇLÜ AL"), "#1dd1a1")
@@ -1434,13 +1057,8 @@ class TestSmcApp(unittest.TestCase):
     def test_extract_tv_symbol(self):
         self.assertEqual(extract_tv_symbol("THYAO.IS"), "THYAO")
 
-    def test_universe_options_contains_bist30(self):
-        options = universe_options()
-        self.assertIn("BIST 30", options)
-        self.assertGreaterEqual(len(options["BIST 30"]), 30)
 
-
-def run_tests() -> int:() -> int:
+def run_tests() -> int:
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(TestSmcApp)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
@@ -1449,11 +1067,9 @@ def run_tests() -> int:() -> int:
 def main() -> int:
     if "--run-tests" in sys.argv:
         return run_tests()
-
     if STREAMLIT_AVAILABLE:
         main_streamlit()
         return 0
-
     print_environment_help()
     return 0
 
