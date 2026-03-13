@@ -29,7 +29,8 @@ except ModuleNotFoundError:
     yf = None
     YFINANCE_AVAILABLE = False
 
-APP_TITLE = "Atlas Terminal"
+APP_TITLE = "Atlas Money"
+APP_SUBTITLE = "Your AI Portfolio Assistant"
 DB_PATH = "signals.db"
 
 TIMEFRAME_MAP = {
@@ -102,7 +103,7 @@ RISK_CONFIGS: Dict[str, Dict[str, Any]] = {
     "Agresif": {"sl_mult": 1.9, "tp_mult": 3.8, "risk_tag": "Agresif risk"},
 }
 
-STYLE_TAG = "atlas_terminal_v4"
+STYLE_TAG = "atlas_money_v1_layout"
 
 
 def cache_data_stub(*args, **kwargs):
@@ -838,59 +839,141 @@ def build_time_matrix(symbols: List[str], tfs: List[str], profile_name: str, ris
 
 def inject_custom_css() -> None:
     st.markdown(
-        f"""
+        """
         <style>
-        html, body, [class*="css"] {{ font-family: Inter, system-ui, sans-serif; }}
-        .stApp {{
-            background: radial-gradient(circle at top left, rgba(56,189,248,0.10), transparent 28%),
-                        radial-gradient(circle at top right, rgba(20,184,166,0.10), transparent 22%),
-                        linear-gradient(180deg, #020617 0%, #071121 100%);
-            color: #e2e8f0;
-        }}
-        .block-container {{ padding-top: 1rem; padding-bottom: 2rem; max-width: 1550px; }}
-        section[data-testid="stSidebar"] {{
+        html, body, [class*="css"] { font-family: Inter, system-ui, sans-serif; }
+        .stApp {
+            background:
+                radial-gradient(circle at top left, rgba(56,189,248,0.08), transparent 24%),
+                radial-gradient(circle at top right, rgba(16,185,129,0.08), transparent 20%),
+                linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
+            color: #e5e7eb;
+        }
+        .block-container { max-width: 1540px; padding-top: 0.8rem; padding-bottom: 2rem; }
+        section[data-testid="stSidebar"] {
             background: linear-gradient(180deg, rgba(15,23,42,0.98), rgba(2,6,23,0.98));
-            border-right: 1px solid rgba(148,163,184,0.12);
-        }}
-        div[data-testid="stMetric"] {{
-            background: linear-gradient(180deg, rgba(15,23,42,0.92), rgba(15,23,42,0.72));
+            border-right: 1px solid rgba(148,163,184,0.10);
+        }
+        div[data-testid="stMetric"] {
+            background: linear-gradient(180deg, rgba(17,24,39,0.96), rgba(17,24,39,0.82));
             border: 1px solid rgba(148,163,184,0.10);
             padding: 14px 16px;
             border-radius: 18px;
-            box-shadow: 0 10px 30px rgba(2,6,23,0.28);
-        }}
-        .hero-card {{
+            box-shadow: 0 12px 30px rgba(2,6,23,0.24);
+        }
+        .topbar {
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:18px;
+            padding:16px 18px;
+            border-radius:22px;
+            background: linear-gradient(180deg, rgba(15,23,42,0.88), rgba(15,23,42,0.72));
+            border:1px solid rgba(148,163,184,0.10);
+            margin-bottom: 1rem;
+        }
+        .brand-title { font-size:1.5rem; font-weight:800; color:#f8fafc; line-height:1.1; }
+        .brand-sub { color:#94a3b8; font-size:0.92rem; margin-top:4px; }
+        .nav-pills { display:flex; gap:10px; flex-wrap:wrap; }
+        .nav-pill {
+            padding:10px 14px; border-radius:999px;
+            background: rgba(30,41,59,0.85);
+            color:#cbd5e1; border:1px solid rgba(148,163,184,0.10);
+            font-size:0.82rem; font-weight:700;
+        }
+        .hero-card {
             padding: 22px 24px;
             border-radius: 24px;
-            background: linear-gradient(135deg, rgba(14,165,233,0.18), rgba(15,23,42,0.78) 45%, rgba(16,185,129,0.14));
+            background: linear-gradient(135deg, rgba(14,165,233,0.14), rgba(15,23,42,0.84) 45%, rgba(16,185,129,0.12));
             border: 1px solid rgba(125,211,252,0.14);
             margin-bottom: 1rem;
-            box-shadow: 0 20px 45px rgba(2,6,23,0.32);
-        }}
-        .hero-title {{ font-size: 2rem; font-weight: 800; color: #f8fafc; margin-bottom: 0.25rem; }}
-        .hero-sub {{ color: #94a3b8; font-size: 0.98rem; margin-bottom: 1rem; }}
-        .status-row {{ display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }}
-        .status-pill {{ border-radius: 16px; padding: 12px 14px; background: rgba(15,23,42,0.65); border: 1px solid rgba(148,163,184,0.10); }}
-        .status-pill .label {{ color: #94a3b8; font-size: 0.8rem; margin-bottom: 4px; }}
-        .status-pill .value {{ color: #f8fafc; font-size: 1rem; font-weight: 700; }}
-        .glass-card {{ background: linear-gradient(180deg, rgba(15,23,42,0.84), rgba(15,23,42,0.60)); border: 1px solid rgba(148,163,184,0.10); border-radius: 22px; padding: 18px; box-shadow: 0 12px 32px rgba(2,6,23,0.28); }}
-        .signal-box {{ padding: 18px; border-radius: 20px; background: linear-gradient(180deg, rgba(15,23,42,0.94), rgba(15,23,42,0.70)); border: 1px solid rgba(148,163,184,0.10); min-height: 100%; }}
-        .signal-head {{ font-size: 0.82rem; color: #94a3b8; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.08em; }}
-        .signal-value {{ font-size: 1.25rem; font-weight: 800; color: #f8fafc; margin-bottom: 0.55rem; }}
-        .signal-note {{ color: #cbd5e1; font-size: 0.92rem; line-height: 1.5; }}
-        .mini-badge {{ display: inline-block; margin-top: 8px; padding: 6px 10px; border-radius: 999px; font-size: 0.78rem; background: rgba(56,189,248,0.10); color: #7dd3fc; border: 1px solid rgba(56,189,248,0.14); }}
-        .pulse-wrap {{ display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:12px; margin: 0.7rem 0 1rem 0; }}
-        .pulse-card {{ background: rgba(15,23,42,0.74); border:1px solid rgba(148,163,184,0.1); border-radius:16px; padding:14px; }}
-        .scanner-row {{ display:grid; grid-template-columns: 1.1fr .65fr .75fr .7fr .7fr .9fr .8fr .6fr; gap:10px; align-items:center; padding:12px 14px; border-radius:16px; background: rgba(15,23,42,0.64); border:1px solid rgba(148,163,184,0.08); margin-bottom:8px; }}
-        .scanner-head {{ color:#94a3b8; font-size:0.76rem; text-transform:uppercase; letter-spacing:0.08em; }}
-        .scanner-val {{ color:#f8fafc; font-size:0.95rem; font-weight:700; }}
-        .heatbar {{ height: 8px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow:hidden; }}
-        .heatfill {{ height:100%; border-radius:999px; }}
-        .select-btn button {{ width:100%; border-radius:12px; }}
-        button[data-baseweb="tab"] {{ height: 46px; border-radius: 14px; background: rgba(15,23,42,0.55); border: 1px solid rgba(148,163,184,0.10); color: #cbd5e1; padding: 0 16px; }}
-        button[data-baseweb="tab"][aria-selected="true"] {{ background: linear-gradient(135deg, rgba(14,165,233,0.16), rgba(16,185,129,0.14)); color: #f8fafc; border: 1px solid rgba(125,211,252,0.18); }}
-        .footer-note {{ color: #64748b; font-size: 0.85rem; margin-top: 0.8rem; }}
+            box-shadow: 0 18px 45px rgba(2,6,23,0.28);
+        }
+        .hero-title { font-size: 1.95rem; font-weight: 800; color: #f8fafc; margin-bottom: 0.25rem; }
+        .hero-sub { color: #94a3b8; font-size: 0.98rem; margin-bottom: 1rem; }
+        .status-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+        .status-pill {
+            border-radius: 16px; padding: 12px 14px;
+            background: rgba(15,23,42,0.70); border: 1px solid rgba(148,163,184,0.10);
+        }
+        .status-pill .label { color: #94a3b8; font-size: 0.78rem; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+        .status-pill .value { color: #f8fafc; font-size: 1rem; font-weight: 700; }
+        .panel-card {
+            background: linear-gradient(180deg, rgba(15,23,42,0.90), rgba(15,23,42,0.68));
+            border: 1px solid rgba(148,163,184,0.10);
+            border-radius: 22px;
+            padding: 18px;
+            box-shadow: 0 12px 32px rgba(2,6,23,0.22);
+            margin-bottom: 1rem;
+        }
+        .section-title { color:#f8fafc; font-size:1.05rem; font-weight:800; margin-bottom:6px; }
+        .section-sub { color:#94a3b8; font-size:0.9rem; margin-bottom:12px; }
+        .action-grid { display:grid; grid-template-columns: 1.3fr 1fr 1fr; gap:12px; margin-bottom:1rem; }
+        .action-card {
+            padding: 18px; border-radius: 20px;
+            background: linear-gradient(180deg, rgba(15,23,42,0.96), rgba(15,23,42,0.72));
+            border: 1px solid rgba(148,163,184,0.10);
+            min-height: 100%;
+        }
+        .action-head { font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.45rem; text-transform: uppercase; letter-spacing: 0.08em; }
+        .action-value { font-size: 1.22rem; font-weight: 800; color: #f8fafc; margin-bottom: 0.55rem; }
+        .action-note { color: #cbd5e1; font-size: 0.92rem; line-height: 1.55; }
+        .tiny-badge {
+            display:inline-block; margin-top:10px; padding:6px 10px; border-radius:999px;
+            font-size:0.76rem; background: rgba(56,189,248,0.10); color:#7dd3fc; border:1px solid rgba(56,189,248,0.14);
+        }
+        .radar-card {
+            padding:16px 18px; border-radius:18px; margin-bottom:10px;
+            background: linear-gradient(180deg, rgba(17,24,39,0.96), rgba(17,24,39,0.78));
+            border:1px solid rgba(148,163,184,0.08);
+        }
+        .radar-top { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
+        .radar-symbol { font-size:1.1rem; font-weight:800; color:#f8fafc; }
+        .radar-meta { color:#94a3b8; font-size:0.84rem; margin-top:4px; }
+        .strength-wrap { min-width:180px; }
+        .strength-label { color:#cbd5e1; font-size:0.84rem; margin-bottom:5px; text-align:right; }
+        .heatbar { height:10px; border-radius:999px; background: rgba(255,255,255,0.06); overflow:hidden; }
+        .heatfill { height:100%; border-radius:999px; }
+        .radar-stats { display:grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap:10px; margin-top:12px; }
+        .stat-box { background: rgba(2,6,23,0.28); border:1px solid rgba(148,163,184,0.08); border-radius:14px; padding:10px 12px; }
+        .stat-label { color:#94a3b8; font-size:0.73rem; text-transform:uppercase; letter-spacing:0.06em; }
+        .stat-value { color:#f8fafc; font-size:0.95rem; font-weight:700; margin-top:4px; }
+        .alert-item {
+            display:flex; align-items:flex-start; gap:10px;
+            padding:12px 14px; border-radius:16px; margin-bottom:10px;
+            background: rgba(15,23,42,0.70); border:1px solid rgba(148,163,184,0.08);
+        }
+        .alert-dot { width:10px; height:10px; border-radius:999px; margin-top:6px; }
+        .footer-note { color:#64748b; font-size:0.84rem; margin-top:0.8rem; }
+        button[data-baseweb="tab"] {
+            height: 46px; border-radius: 14px; background: rgba(15,23,42,0.55);
+            border: 1px solid rgba(148,163,184,0.10); color: #cbd5e1; padding: 0 16px;
+        }
+        button[data-baseweb="tab"][aria-selected="true"] {
+            background: linear-gradient(135deg, rgba(14,165,233,0.16), rgba(16,185,129,0.14));
+            color: #f8fafc; border: 1px solid rgba(125,211,252,0.18);
+        }
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_topbar() -> None:
+    st.markdown(
+        f"""
+        <div class="topbar">
+            <div>
+                <div class="brand-title">{APP_TITLE}</div>
+                <div class="brand-sub">{APP_SUBTITLE}</div>
+            </div>
+            <div class="nav-pills">
+                <div class="nav-pill">Radar</div>
+                <div class="nav-pill">Portföy</div>
+                <div class="nav-pill">Alarm</div>
+                <div class="nav-pill">Geçmiş</div>
+            </div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
@@ -907,18 +990,18 @@ def render_hero(result: Optional[AnalysisResult], selected_symbol: str, timefram
     st.markdown(
         f"""
         <div class="hero-card">
-            <div class="hero-title">{APP_TITLE}</div>
-            <div class="hero-sub">Scanner-first mimari, kullanıcı profiline göre filtrelenmiş fırsatlar ve premium karar ekranı.</div>
+            <div class="hero-title">Günlük Aksiyon Merkezi</div>
+            <div class="hero-sub">Profiline göre filtrelenmiş fırsatlar, açık pozisyon takibi ve aksiyon odaklı karar desteği.</div>
             <div class="status-row">
                 <div class="status-pill"><div class="label">Profil</div><div class="value">{profile_name}</div></div>
                 <div class="status-pill"><div class="label">Risk Modu</div><div class="value">{risk_mode}</div></div>
-                <div class="status-pill"><div class="label">Sembol</div><div class="value">{selected_symbol}</div></div>
-                <div class="status-pill"><div class="label">Aktif Karar</div><div class="value" style="color:{verdict_hex};">{verdict}</div></div>
+                <div class="status-pill"><div class="label">Aktif Sembol</div><div class="value">{selected_symbol}</div></div>
+                <div class="status-pill"><div class="label">Karar</div><div class="value" style="color:{verdict_hex};">{verdict}</div></div>
             </div>
             <div class="status-row" style="margin-top:12px;">
                 <div class="status-pill"><div class="label">Zaman Dilimi</div><div class="value">{timeframe}</div></div>
                 <div class="status-pill"><div class="label">Son Fiyat</div><div class="value">{price}</div></div>
-                <div class="status-pill"><div class="label">Market Strength</div><div class="value">{market_strength}</div></div>
+                <div class="status-pill"><div class="label">Strength</div><div class="value">{market_strength}</div></div>
                 <div class="status-pill"><div class="label">Likidite / MTF</div><div class="value">{sweep} · {mtf}</div></div>
             </div>
         </div>
@@ -1056,20 +1139,125 @@ def render_scan_overview(scan_df: pd.DataFrame) -> None:
 def render_market_pulse(scan_df: pd.DataFrame) -> None:
     if scan_df.empty:
         return
+    st.markdown('<div class="panel-card"><div class="section-title">Bugünün Nabzı</div><div class="section-sub">En güçlü adaylar ve profile uygun çıkan radar sonuçları.</div>', unsafe_allow_html=True)
     top = scan_df.head(4)
-    cards = []
-    for _, row in top.iterrows():
+    cols = st.columns(4)
+    for idx, (_, row) in enumerate(top.iterrows()):
+        with cols[idx]:
+            clr = strength_color(float(row["Güç %"]))
+            st.markdown(
+                f"<div class='action-card'><div class='action-head'>Top Mover</div><div class='action-value'>{row['Sembol']}</div><div class='action-note'>Karar: <span style='color:{clr};font-weight:700'>{row['Karar']}</span><br>Strength: %{row['Güç %']} · RR: {row['RR']}</div><div class='tiny-badge'>{row['TF']} · {row['Profil']}</div></div>",
+                unsafe_allow_html=True,
+            )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_action_center(scan_df: pd.DataFrame) -> None:
+    if scan_df.empty:
+        return
+
+    buy_row = scan_df.iloc[0]
+    watch_df = scan_df.iloc[1:3]
+    defensive_row = scan_df.iloc[-1]
+
+    watch_lines = "<br>".join([
+        f"{row['Sembol']} · {row['Karar']} · Strength %{row['Güç %']} · RR {row['RR']}"
+        for _, row in watch_df.iterrows()
+    ]) if not watch_df.empty else "İzleme listesi şu an sakin."
+
+    st.markdown(
+        f"""
+        <div class="action-grid">
+            <div class="action-card">
+                <div class="action-head">AL</div>
+                <div class="action-value">{buy_row['Sembol']} · {buy_row['Karar']}</div>
+                <div class="action-note">Entry: {format_price(float(buy_row['Fiyat']))}<br>Strength: %{buy_row['Güç %']} · RR: {buy_row['RR']}<br>Likidite: {buy_row['Likidite']} · MTF: {buy_row['MTF']}</div>
+                <div class="tiny-badge">Portföye eklenmeye en yakın aday</div>
+            </div>
+            <div class="action-card">
+                <div class="action-head">İZLE</div>
+                <div class="action-value">Takip Listesi</div>
+                <div class="action-note">{watch_lines}</div>
+                <div class="tiny-badge">Güç toplayan fırsatlar</div>
+            </div>
+            <div class="action-card">
+                <div class="action-head">DİKKAT</div>
+                <div class="action-value">{defensive_row['Sembol']}</div>
+                <div class="action-note">Strength %{defensive_row['Güç %']} · Karar: {defensive_row['Karar']}<br>Daha zayıf profile uygunluk gösteriyor.</div>
+                <div class="tiny-badge">Koruma tarafı</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_radar_cards(scan_df: pd.DataFrame, key_prefix: str = "radar") -> Optional[str]:
+    if scan_df.empty:
+        st.info("Radar için uygun fırsat bulunamadı.")
+        return None
+
+    max_items = 5 if scan_df.iloc[0]["Risk"] == "Düşük" else 3
+    display_df = scan_df.head(max_items).copy()
+
+    st.markdown('<div class="panel-card"><div class="section-title">Potansiyelli İşlemler</div><div class="section-sub">Ham scanner yerine doğrudan aksiyon alınabilir fırsatlar gösterilir.</div>', unsafe_allow_html=True)
+    selected_symbol = None
+    for i, (_, row) in enumerate(display_df.iterrows()):
         clr = strength_color(float(row["Güç %"]))
-        cards.append(
-            f"<div class='pulse-card'><div class='signal-head'>Top Mover</div><div class='signal-value'>{row['Sembol']}</div><div class='signal-note'>Karar: <span style='color:{clr};font-weight:700'>{row['Karar']}</span><br>Strength: %{row['Güç %']} · RR: {row['RR']}</div></div>"
+        heat = max(0, min(100, float(row["Güç %"])))
+        st.markdown(
+            f"""
+            <div class="radar-card">
+                <div class="radar-top">
+                    <div>
+                        <div class="radar-symbol">{row['Sembol']} · <span style="color:{clr};">{row['Karar']}</span></div>
+                        <div class="radar-meta">{row['Profil']} profiline uygun · {row['TF']} · Likidite: {row['Likidite']}</div>
+                    </div>
+                    <div class="strength-wrap">
+                        <div class="strength-label">Strength %{row['Güç %']}</div>
+                        <div class="heatbar"><div class="heatfill" style="width:{heat}%; background:{clr};"></div></div>
+                    </div>
+                </div>
+                <div class="radar-stats">
+                    <div class="stat-box"><div class="stat-label">Fiyat</div><div class="stat-value">{format_price(float(row['Fiyat']))}</div></div>
+                    <div class="stat-box"><div class="stat-label">RR</div><div class="stat-value">{row['RR']}</div></div>
+                    <div class="stat-box"><div class="stat-label">OB</div><div class="stat-value">{row['OB']}</div></div>
+                    <div class="stat-box"><div class="stat-label">MTF</div><div class="stat-value">{row['MTF']}</div></div>
+                    <div class="stat-box"><div class="stat-label">Profil</div><div class="stat-value">{row['Risk']}</div></div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-    st.markdown(f"<div class='pulse-wrap'>{''.join(cards)}</div>", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns([1, 1, 5])
+        with c1:
+            if st.button("Grafik", key=f"{key_prefix}_graph_{row['Sembol']}_{i}", use_container_width=True):
+                selected_symbol = str(row["Sembol"])
+        with c2:
+            st.button("Portföye Ekle", key=f"{key_prefix}_portfolio_{row['Sembol']}_{i}", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    return selected_symbol
+
+
+def render_alert_preview() -> None:
+    st.markdown('<div class="panel-card"><div class="section-title">Alarm Merkezi</div><div class="section-sub">Gün içi uyarı mantığı için örnek akış.</div>', unsafe_allow_html=True)
+    alerts = [
+        ("#22c55e", "Yeni fırsat oluştu", "NVDA · Strength %79 · RR 2.1 ile AL tarafına geçti."),
+        ("#f59e0b", "Pozisyon izleniyor", "AAPL · MTF korunuyor, şimdilik TUT senaryosu devam ediyor."),
+        ("#f43f5e", "Risk arttı", "AMD · momentum zayıflıyor, CHoCH ihtimali yükseliyor."),
+    ]
+    for color, title, body in alerts:
+        st.markdown(
+            f"<div class='alert-item'><div class='alert-dot' style='background:{color};'></div><div><div class='signal-value' style='font-size:0.98rem; margin-bottom:0.2rem;'>{title}</div><div class='signal-note'>{body}</div></div></div>",
+            unsafe_allow_html=True,
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_scanner_table(scan_df: pd.DataFrame, key_prefix: str = "main") -> Optional[str]:
     c1, c2, c3, c4 = st.columns([1.1, 1.0, 1.0, 0.9])
     with c1:
-        search_term = st.text_input("Sembol ara", value="", placeholder="Örn: THYAO", key=f"{key_prefix}_search_term")
+        search_term = st.text_input("Sembol ara", value="", placeholder="Örn: NVDA", key=f"{key_prefix}_search_term")
     with c2:
         verdict_filter = st.selectbox("Karar filtresi", ["Tümü", "GÜÇLÜ AL", "AL / İZLE", "İZLE", "SAT / İZLE", "GÜÇLÜ SAT"], index=0, key=f"{key_prefix}_verdict_filter")
     with c3:
@@ -1094,57 +1282,10 @@ def render_scanner_table(scan_df: pd.DataFrame, key_prefix: str = "main") -> Opt
         st.info("Filtreye uygun sonuç yok.")
         return None
 
-    header = """
-    <div class='scanner-row' style='background:rgba(56,189,248,0.08);'>
-      <div class='scanner-head'>Sembol</div>
-      <div class='scanner-head'>Fiyat</div>
-      <div class='scanner-head'>Karar</div>
-      <div class='scanner-head'>Strength</div>
-      <div class='scanner-head'>RR</div>
-      <div class='scanner-head'>Likidite</div>
-      <div class='scanner-head'>OB / MTF</div>
-      <div class='scanner-head'>Seç</div>
-    </div>
-    """
-    st.markdown(header, unsafe_allow_html=True)
-
-    selected_symbol: Optional[str] = None
-    for i, (_, row) in enumerate(filtered.head(25).iterrows()):
-        heat = max(0, min(100, float(row["Güç %"])))
-        clr = strength_color(float(row["Güç %"]))
-        rr_text = "-" if pd.isna(row["RR"]) else str(row["RR"])
-        html = f"""
-        <div class='scanner-row'>
-          <div class='scanner-val'>{row['Sembol']}</div>
-          <div class='scanner-val'>{format_price(float(row['Fiyat']))}</div>
-          <div class='scanner-val' style='color:{clr};'>{row['Karar']}</div>
-          <div>
-             <div class='scanner-val'>%{row['Güç %']}</div>
-             <div class='heatbar'><div class='heatfill' style='width:{heat}%; background:{clr};'></div></div>
-          </div>
-          <div class='scanner-val'>{rr_text}</div>
-          <div class='scanner-val'>{row['Likidite']}</div>
-          <div class='scanner-val'>{row['OB']} · {row['MTF']}</div>
-        </div>
-        """
-        cols = st.columns([10, 1])
-        with cols[0]:
-            st.markdown(html, unsafe_allow_html=True)
-        with cols[1]:
-            if st.button("Aç", key=f"{key_prefix}_pick_{row['Sembol']}_{i}", use_container_width=True):
-                selected_symbol = str(row["Sembol"])
-
-    top_hits = filtered.head(3)
-    cols = st.columns(3)
-    for idx, (_, row) in enumerate(top_hits.iterrows()):
-        with cols[idx]:
-            clr = strength_color(float(row["Güç %"]))
-            st.markdown(
-                f"<div class='signal-box'><div class='signal-head'>Öne Çıkan Setup</div><div class='signal-value'>{row['Sembol']}</div><div class='signal-note'>Karar: <span style='color:{clr};font-weight:700;'>{row['Karar']}</span><br>Güç: %{row['Güç %']} · RR: {row['RR']}<br>Likidite: {row['Likidite']}</div><div class='mini-badge'>TF {row['TF']} · {row['Profil']}</div></div>",
-                unsafe_allow_html=True,
-            )
-
-    return selected_symbol
+    show_df = filtered.copy()
+    show_df["Fiyat"] = show_df["Fiyat"].apply(lambda x: format_price(float(x)) if pd.notna(x) else "-")
+    st.dataframe(show_df, use_container_width=True, hide_index=True)
+    return None
 
 
 def render_history() -> None:
@@ -1187,6 +1328,7 @@ def notes_block() -> None:
 def main_streamlit() -> None:
     st.set_page_config(page_title=APP_TITLE, page_icon="📈", layout="wide")
     inject_custom_css()
+    render_topbar()
     init_db()
     symbols, timeframe, auto_scan, interval, matrix_count, profile_name, risk_mode = sidebar()
 
@@ -1212,44 +1354,34 @@ def main_streamlit() -> None:
 
     left, right = st.columns([2.3, 1])
     with left:
-        selected_symbol = st.selectbox("Hisse seç", symbols, index=symbols.index(st.session_state["symbol_select_widget"]), key="symbol_select_widget")
+        selected_symbol = st.selectbox("Aktif hisse", symbols, index=symbols.index(st.session_state["symbol_select_widget"]), key="symbol_select_widget")
         st.session_state["selected_symbol"] = selected_symbol
     with right:
-        analyze_btn = st.button("Analizi Çalıştır", use_container_width=True)
+        analyze_btn = st.button("Analizi Güncelle", use_container_width=True)
 
     result_for_hero: Optional[AnalysisResult] = st.session_state.get("last_result")
     render_hero(result_for_hero, selected_symbol, timeframe, profile_name, risk_mode)
     render_profile_panel(profile_name, risk_mode)
 
-    with st.spinner("Scanner hazırlanıyor..."):
+    with st.spinner("Radar hazırlanıyor..."):
         live_scan_df = scan_symbols(symbols, timeframe, profile_name, risk_mode)
 
-    st.markdown("### Atlas Scanner")
-    if live_scan_df.empty:
-        st.info("Tarama sonucu bulunamadı.")
-    else:
+    if not live_scan_df.empty:
         render_market_pulse(live_scan_df)
-        render_scan_overview(live_scan_df)
-        picked = render_scanner_table(live_scan_df, key_prefix="top")
+        render_action_center(live_scan_df)
+        picked = render_radar_cards(live_scan_df, key_prefix="top_radar")
         if picked:
             st.session_state["pending_symbol_pick"] = picked
-            st.success(f"{picked} grafik analiz için seçildi. Grafik Analiz sekmesine geçebilirsin.")
             st.rerun()
+    else:
+        st.info("Profile uygun potansiyelli işlem bulunamadı.")
 
-    tabs = st.tabs(["🛰️ Scanner", "📊 Grafik Analiz", "🧭 Zaman Matrisi", "🗃️ Geçmiş"])
+    tabs = st.tabs(["📊 Radar", "📈 Grafik", "👜 Portföy", "🔔 Alarm", "🗃️ Geçmiş"])
 
     with tabs[0]:
-        st.subheader("Canlı Fırsat Masası")
-        if live_scan_df.empty:
-            st.info("Tarama sonucu bulunamadı.")
-        else:
-            render_market_pulse(live_scan_df)
-            render_scan_overview(live_scan_df)
-            picked_tab = render_scanner_table(live_scan_df, key_prefix="tab")
-            if picked_tab:
-                st.session_state["pending_symbol_pick"] = picked_tab
-                st.success(f"{picked_tab} grafik analiz için seçildi.")
-                st.rerun()
+        st.markdown('<div class="panel-card"><div class="section-title">Radar Tablosu</div><div class="section-sub">Daha detaylı tarama görünümü.</div>', unsafe_allow_html=True)
+        render_scanner_table(live_scan_df, key_prefix="radar_table")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with tabs[1]:
         active_symbol = st.session_state.get("selected_symbol", selected_symbol)
@@ -1262,7 +1394,6 @@ def main_streamlit() -> None:
                 st.session_state["last_result"] = result
                 st.session_state["last_analyzed_symbol"] = active_symbol
                 save_signal(result)
-                render_hero(result, active_symbol, timeframe, profile_name, risk_mode)
                 render_summary_cards(result)
                 render_signal_boxes(result)
                 fig = plot_chart(df, result)
@@ -1272,16 +1403,21 @@ def main_streamlit() -> None:
                     st.info("Grafik için plotly kurulmalı.")
                 render_structure_panel(result)
                 st.markdown('<div class="footer-note">Bu analiz yatırım tavsiyesi değildir.</div>', unsafe_allow_html=True)
-        elif result_for_hero is not None:
-            st.info("Son analiz görüntüleniyor. Farklı sembol için scannerdan seçebilir ya da butona basabilirsin.")
 
     with tabs[2]:
-        st.subheader("Zaman Matrisi")
-        with st.spinner("Zaman matrisi hazırlanıyor..."):
-            matrix_df = build_time_matrix(symbols[:matrix_count], ["1H", "4H", "1D", "1W"], profile_name, risk_mode)
-        st.dataframe(matrix_df, use_container_width=True, hide_index=True)
+        st.markdown('<div class="panel-card"><div class="section-title">Demo Portföy</div><div class="section-sub">Midas üzerinde açtığın işlemleri buraya manuel girip portföy asistanı gibi takip edeceğiz.</div>', unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.text_input("Sembol", value=st.session_state.get("selected_symbol", selected_symbol), key="portfolio_symbol")
+        c2.number_input("Alış Fiyatı", min_value=0.0, value=0.0, step=0.1, key="portfolio_entry")
+        c3.number_input("Adet", min_value=1, value=1, step=1, key="portfolio_qty")
+        c4.button("Portföye Ekle", use_container_width=True, key="portfolio_add_btn")
+        st.info("Bu sürümde portföy formu layout olarak hazırlandı. Sonraki turda kayıt, PnL ve alarm mantığını bağlayacağız.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with tabs[3]:
+        render_alert_preview()
+
+    with tabs[4]:
         render_history()
 
     install_block()
