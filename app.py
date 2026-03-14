@@ -32,7 +32,7 @@ except ModuleNotFoundError:
     YFINANCE_AVAILABLE = False
 
 APP_TITLE = "Atlas Money"
-APP_SUBTITLE = "Piyasaları Sadeleştirir"
+APP_SUBTITLE = "Basit Anlatan Yatırım Aracı"
 DB_PATH = "signals.db"
 INITIAL_CASH = 0.0
 
@@ -153,14 +153,40 @@ def init_db() -> None:
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dividends_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT,
+            symbol TEXT,
+            quantity REAL,
+            amount_per_share REAL,
+            gross_amount REAL,
+            withholding_rate REAL DEFAULT 0,
+            withholding_tax REAL DEFAULT 0,
+            net_amount REAL DEFAULT 0,
+            fx_rate REAL DEFAULT 0,
+            net_amount_try REAL DEFAULT 0,
+            note TEXT DEFAULT ''
+        )
+        """
+    )
     portfolio_cols = [r[1] for r in cur.execute("PRAGMA table_info(portfolio)").fetchall()]
     if "asset_type" not in portfolio_cols:
         cur.execute("ALTER TABLE portfolio ADD COLUMN asset_type TEXT DEFAULT 'Hisse'")
     if "coupon_date" not in portfolio_cols:
         cur.execute("ALTER TABLE portfolio ADD COLUMN coupon_date TEXT DEFAULT ''")
+    if "entry_fx" not in portfolio_cols:
+        cur.execute("ALTER TABLE portfolio ADD COLUMN entry_fx REAL DEFAULT 0")
     history_cols = [r[1] for r in cur.execute("PRAGMA table_info(trades_history)").fetchall()]
     if "asset_type" not in history_cols:
         cur.execute("ALTER TABLE trades_history ADD COLUMN asset_type TEXT DEFAULT 'Hisse'")
+    if "entry_fx" not in history_cols:
+        cur.execute("ALTER TABLE trades_history ADD COLUMN entry_fx REAL DEFAULT 0")
+    if "exit_fx" not in history_cols:
+        cur.execute("ALTER TABLE trades_history ADD COLUMN exit_fx REAL DEFAULT 0")
+    if "pnl_try" not in history_cols:
+        cur.execute("ALTER TABLE trades_history ADD COLUMN pnl_try REAL DEFAULT 0")
     conn.commit()
     conn.close()
     maybe_sync_initial_cash_with_positions()
@@ -204,6 +230,19 @@ def get_display_currency() -> str:
 
 def set_display_currency(value: str) -> None:
     set_app_state("display_currency", value.upper())
+
+
+def get_estimated_tax_rate() -> float:
+    value = get_app_state_float("estimated_tax_rate", 15.0)
+    if value < 0:
+        value = 0.0
+    if value > 100:
+        value = 100.0
+    return float(value)
+
+
+def set_estimated_tax_rate(value: float) -> None:
+    set_app_state("estimated_tax_rate", str(float(max(0.0, min(100.0, value)))))
 
 
 @cache_data(ttl=900, show_spinner=False)
@@ -313,6 +352,65 @@ def load_cash_transactions() -> pd.DataFrame:
     return df
 
 
+def add_dividend_record(symbol: str, quantity: float, amount_per_share: float, withholding_rate: float = 0.0, note: str = "") -> None:
+    gross_amount = float(quantity) * float(amount_per_share)
+    withholding_tax = gross_amount * (float(withholding_rate) / 100.0)
+    net_amount = gross_amount - withholding_tax
+    fx_rate = get_usdtry_rate()
+    net_amount_try = net_amount * fx_rate
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """
+        INSERT INTO dividends_history (
+            created_at, symbol, quantity, amount_per_share, gross_amount,
+            withholding_rate, withholding_tax, net_amount, fx_rate, net_amount_try, note
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            datetime.now().isoformat(timespec="seconds"),
+            symbol,
+            float(quantity),
+            float(amount_per_share),
+            float(gross_amount),
+            float(withholding_rate),
+            float(withholding_tax),
+            float(net_amount),
+            float(fx_rate),
+            float(net_amount_try),
+            note,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_dividend_history() -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql_query("SELECT * FROM dividends_history ORDER BY id DESC", conn)
+    except Exception:
+        df = pd.DataFrame(columns=["id", "created_at", "symbol", "quantity", "amount_per_share", "gross_amount", "withholding_rate", "withholding_tax", "net_amount", "fx_rate", "net_amount_try", "note"])
+    conn.close()
+    return df
+
+
+def get_dividend_summary() -> Dict[str, float]:
+    div_df = load_dividend_history()
+    if div_df.empty:
+        return {"gross_dividends": 0.0, "withholding_tax": 0.0, "net_dividends": 0.0, "net_dividends_try": 0.0}
+    gross_dividends = float(pd.to_numeric(div_df["gross_amount"], errors="coerce").fillna(0).sum())
+    withholding_tax = float(pd.to_numeric(div_df["withholding_tax"], errors="coerce").fillna(0).sum())
+    net_dividends = float(pd.to_numeric(div_df["net_amount"], errors="coerce").fillna(0).sum())
+    net_dividends_try = float(pd.to_numeric(div_df["net_amount_try"], errors="coerce").fillna(0).sum())
+    return {
+        "gross_dividends": gross_dividends,
+        "withholding_tax": withholding_tax,
+        "net_dividends": net_dividends,
+        "net_dividends_try": net_dividends_try,
+    }
+
+
 def get_cash_flow_summary() -> Dict[str, float]:
     cash_df = load_cash_transactions()
     deposits = 0.0
@@ -337,13 +435,15 @@ def add_portfolio_position(
     target_weight: float = 0.0,
     asset_type: str = "Hisse",
     coupon_date: str = "",
+    entry_fx: Optional[float] = None,
 ) -> None:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+    effective_entry_fx = float(entry_fx) if entry_fx and entry_fx > 0 else float(get_usdtry_rate())
     cur.execute(
         """
-        INSERT INTO portfolio (created_at, symbol, entry_price, quantity, note, source, target_weight, asset_type, coupon_date, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
+        INSERT INTO portfolio (created_at, symbol, entry_price, quantity, note, source, target_weight, asset_type, coupon_date, status, entry_fx)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
         """,
         (
             datetime.now().isoformat(timespec="seconds"),
@@ -355,6 +455,7 @@ def add_portfolio_position(
             float(target_weight),
             asset_type,
             coupon_date,
+            effective_entry_fx,
         ),
     )
     conn.commit()
@@ -379,19 +480,22 @@ def close_portfolio_position(position_id: int, exit_price: float) -> None:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     row = cur.execute(
-        "SELECT created_at, symbol, entry_price, quantity, note, source, asset_type FROM portfolio WHERE id = ?",
+        "SELECT created_at, symbol, entry_price, quantity, note, source, asset_type, COALESCE(entry_fx, 0) FROM portfolio WHERE id = ?",
         (int(position_id),),
     ).fetchone()
     if row is None:
         conn.close()
         return
-    opened_at, symbol, entry_price, quantity, note, source, asset_type = row
+    opened_at, symbol, entry_price, quantity, note, source, asset_type, entry_fx = row
     pnl = (float(exit_price) - float(entry_price)) * float(quantity)
     pnl_pct = ((float(exit_price) / float(entry_price)) - 1) * 100 if float(entry_price) else 0.0
+    effective_entry_fx = float(entry_fx) if float(entry_fx or 0) > 0 else float(get_usdtry_rate())
+    exit_fx = float(get_usdtry_rate())
+    pnl_try = ((float(exit_price) * exit_fx) - (float(entry_price) * effective_entry_fx)) * float(quantity)
     cur.execute(
         """
-        INSERT INTO trades_history (opened_at, closed_at, symbol, entry_price, exit_price, quantity, pnl, pnl_pct, note, source, asset_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO trades_history (opened_at, closed_at, symbol, entry_price, exit_price, quantity, pnl, pnl_pct, note, source, asset_type, entry_fx, exit_fx, pnl_try)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             opened_at,
@@ -405,6 +509,9 @@ def close_portfolio_position(position_id: int, exit_price: float) -> None:
             note,
             source,
             asset_type,
+            effective_entry_fx,
+            exit_fx,
+            float(pnl_try),
         ),
     )
     cur.execute("UPDATE portfolio SET status='closed' WHERE id = ?", (int(position_id),))
@@ -433,6 +540,24 @@ def format_price(value: Optional[float], is_money: bool = True) -> str:
         return number
     currency = get_display_currency()
     return f"${number}" if currency == "USD" else f"₺{number}"
+
+
+def format_try(value: Optional[float]) -> str:
+    if value is None:
+        return "-"
+    return f"₺{format_number(value)}"
+
+
+def calculate_estimated_tax(history_df: pd.DataFrame) -> Dict[str, float]:
+    if history_df.empty:
+        return {"taxable_profit_try": 0.0, "estimated_tax_try": 0.0, "tax_rate": get_estimated_tax_rate()}
+    if "pnl_try" not in history_df.columns:
+        taxable_profit_try = 0.0
+    else:
+        taxable_profit_try = float(pd.to_numeric(history_df["pnl_try"], errors="coerce").fillna(0).clip(lower=0).sum())
+    tax_rate = get_estimated_tax_rate()
+    estimated_tax_try = taxable_profit_try * (tax_rate / 100.0)
+    return {"taxable_profit_try": taxable_profit_try, "estimated_tax_try": estimated_tax_try, "tax_rate": tax_rate}
 
 
 def action_color(action: str) -> str:
@@ -739,6 +864,12 @@ def onboarding_sidebar() -> Tuple[str, bool]:
     usdtry = get_usdtry_rate()
     st.sidebar.markdown(f"**Net Sermaye:** {format_price(get_initial_cash())}")
     st.sidebar.caption(f"Kur: 1 USD ≈ ₺{format_number(usdtry)}")
+    current_tax = get_estimated_tax_rate()
+    chosen_tax = st.sidebar.number_input("Tahmini vergi oranı (%)", min_value=0.0, max_value=100.0, value=float(current_tax), step=1.0)
+    if float(chosen_tax) != float(current_tax):
+        set_estimated_tax_rate(float(chosen_tax))
+        st.rerun()
+    st.sidebar.caption("Vergi alanı bilgilendirme amaçlıdır. Kesin hesap için mali müşavir kontrolü gerekir.")
     if st.sidebar.button("Profili Sıfırla", use_container_width=True):
         st.session_state["onboarding_tamam"] = False
         st.session_state["profil"] = "Dengeli"
@@ -820,18 +951,22 @@ def compute_portfolio_snapshot(open_rows: List[Dict[str, Any]], invested_now: fl
     history_df = load_history(500)
     if not history_df.empty:
         realized_pnl = float(pd.to_numeric(history_df["pnl"], errors="coerce").fillna(0).sum())
+    dividend_summary = get_dividend_summary()
+    net_dividends = float(dividend_summary["net_dividends"])
     portfolio_value = invested_now
-    current_equity = net_capital + unrealized_pnl + realized_pnl
+    current_equity = net_capital + unrealized_pnl + realized_pnl + net_dividends
     open_cost = float(sum(r["Giriş Değeri Sayısal"] for r in open_rows)) if open_rows else 0.0
     cash = max(0.0, current_equity - portfolio_value)
-    # ilk kurulumda henüz net sermaye set edilmediyse, ilk alımlara göre oturt
     if get_app_state("initial_cash", "") == "" and open_cost > net_capital and flow["deposits"] == 0 and flow["withdrawals"] == 0 and history_df.empty:
         net_capital = open_cost
-        current_equity = net_capital + unrealized_pnl
+        current_equity = net_capital + unrealized_pnl + net_dividends
         cash = max(0.0, current_equity - portfolio_value)
+    tax_summary = calculate_estimated_tax(history_df)
     riskable = cash * 0.5
     total_pnl = current_equity - net_capital
     total_return_pct = (total_pnl / max(net_capital, 1e-9)) * 100 if net_capital > 0 else 0.0
+    after_tax_total_pnl_usd = total_pnl - (tax_summary["estimated_tax_try"] / max(get_usdtry_rate(), 1e-9))
+    after_tax_return_pct = (after_tax_total_pnl_usd / max(net_capital, 1e-9)) * 100 if net_capital > 0 else 0.0
 
     for row in open_rows:
         row["Mevcut Pay Sayısal"] = row["Pozisyon Değeri Sayısal"] / max(current_equity, 1e-9)
@@ -843,8 +978,15 @@ def compute_portfolio_snapshot(open_rows: List[Dict[str, Any]], invested_now: fl
         "cash": cash,
         "riskable": riskable,
         "unrealized_pnl": unrealized_pnl,
+        "realized_pnl": realized_pnl,
+        "dividend_income": net_dividends,
         "total_pnl": total_pnl,
         "total_return_pct": total_return_pct,
+        "after_tax_total_pnl": after_tax_total_pnl_usd,
+        "after_tax_return_pct": after_tax_return_pct,
+        "taxable_profit_try": tax_summary["taxable_profit_try"],
+        "estimated_tax_try": tax_summary["estimated_tax_try"],
+        "estimated_tax_rate": tax_summary["tax_rate"],
         "deposits": flow["deposits"],
         "withdrawals": flow["withdrawals"],
     }
@@ -875,8 +1017,8 @@ def render_portfolio_overview(open_rows: List[Dict[str, Any]], snapshot: Dict[st
         <div class="metric-grid" style="margin-top:12px;">
             <div class="metric-card"><div class="metric-label">Sistem Getirisi</div><div class="metric-value">%{round(float(snapshot['total_return_pct']), 2)}</div></div>
             <div class="metric-card"><div class="metric-label">Açık K/Z</div><div class="metric-value">{format_price(snapshot['unrealized_pnl'])}</div></div>
-            <div class="metric-card"><div class="metric-label">Toplam Giriş</div><div class="metric-value">{format_price(snapshot['deposits'])}</div></div>
-            <div class="metric-card"><div class="metric-label">Toplam Çıkış</div><div class="metric-value">{format_price(snapshot['withdrawals'])}</div></div>
+            <div class="metric-card"><div class="metric-label">Net Temettü</div><div class="metric-value">{format_price(snapshot['dividend_income'])}</div></div>
+            <div class="metric-card"><div class="metric-label">Tahmini Vergi Etkisi</div><div class="metric-value">{format_try(snapshot['estimated_tax_try'])}</div></div>
         </div>
         <div style="display:flex; justify-content:space-between; margin-top:10px; align-items:center;">
             <span style="color:#94A3B8;">Yeni fırsatlar için düşünülebilir alan: <strong>{format_price(snapshot['riskable'])}</strong></span>
@@ -1303,19 +1445,60 @@ def render_cash_transactions_table() -> None:
     st.dataframe(show[cols], use_container_width=True, hide_index=True)
 
 
+def render_dividend_form(default_symbol: str) -> None:
+    open_df = load_open_portfolio()
+    open_symbols = sorted(open_df["symbol"].astype(str).unique().tolist()) if not open_df.empty else []
+    symbol_options = open_symbols if open_symbols else SEARCHABLE_ASSETS
+    default_index = symbol_options.index(default_symbol) if default_symbol in symbol_options else 0
+    symbol = st.selectbox("Temettü alınan varlık", symbol_options, index=default_index, key="div_symbol")
+    quantity = st.number_input("Temettüye konu adet", min_value=0.0, step=0.0001, value=0.0, key="div_qty")
+    amount_per_share = st.number_input("Hisse başı temettü", min_value=0.0, step=0.0001, value=0.0, key="div_per_share")
+    withholding_rate = st.number_input("Kesilen stopaj (%)", min_value=0.0, max_value=100.0, step=1.0, value=15.0, key="div_withholding")
+    note = st.text_input("Not", value="Temettü tahsilatı", key="div_note")
+
+    gross_amount = quantity * amount_per_share
+    withholding_tax = gross_amount * (withholding_rate / 100.0)
+    net_amount = gross_amount - withholding_tax
+    st.caption(f"Brüt: {format_price(gross_amount)} · Kesinti: {format_price(withholding_tax)} · Net: {format_price(net_amount)}")
+
+    if st.button("Temettü kaydını ekle", use_container_width=True, key="div_submit"):
+        if not symbol or quantity <= 0 or amount_per_share <= 0:
+            st.warning("Varlık, adet ve hisse başı temettü bilgisi gerekli.")
+            return
+        add_dividend_record(symbol, quantity, amount_per_share, withholding_rate, note)
+        st.success(f"{symbol} için temettü kaydı eklendi.")
+        st.rerun()
+
+
+def render_dividend_table() -> None:
+    div_df = load_dividend_history()
+    if div_df.empty:
+        st.info("Henüz temettü kaydı yok.")
+        return
+    show = div_df.copy()
+    for col in ["gross_amount", "withholding_tax", "net_amount"]:
+        show[col] = show[col].apply(lambda x: format_price(float(x)))
+    show["net_amount_try"] = show["net_amount_try"].apply(lambda x: format_try(float(x)))
+    show["withholding_rate"] = show["withholding_rate"].apply(lambda x: f"%{round(float(x), 2)}")
+    cols = ["created_at", "symbol", "quantity", "amount_per_share", "gross_amount", "withholding_rate", "withholding_tax", "net_amount", "net_amount_try", "note"]
+    st.dataframe(show[cols], use_container_width=True, hide_index=True)
+
+
 def render_add_position(default_symbol: str) -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Yeni İşlem</div><div class="section-sub">Pozisyon ekle, sermaye girişi yap veya sermaye çıkışı kaydet.</div>', unsafe_allow_html=True)
 
     tx_mode = st.radio(
         "İşlem türü",
-        ["Pozisyon Ekle", "Sermaye Girişi", "Sermaye Çıkışı"],
+        ["Pozisyon Ekle", "Sermaye Girişi", "Sermaye Çıkışı", "Temettü Kaydı"],
         horizontal=True,
         key="new_tx_mode",
     )
 
     if tx_mode == "Pozisyon Ekle":
         render_position_form(default_symbol)
+    elif tx_mode == "Temettü Kaydı":
+        render_dividend_form(default_symbol)
     else:
         render_cash_transaction_form()
 
@@ -1324,6 +1507,11 @@ def render_add_position(default_symbol: str) -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Sermaye Hareketleri</div><div class="section-sub">Sistem dışından para girişi ve çıkışı burada görünür.</div>', unsafe_allow_html=True)
     render_cash_transactions_table()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Temettü Geçmişi</div><div class="section-sub">Brüt temettü, stopaj ve net geçen tutar burada görünür.</div>', unsafe_allow_html=True)
+    render_dividend_table()
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -1339,8 +1527,9 @@ def render_performance_cards(open_rows: List[Dict[str, Any]], snapshot: Dict[str
         avg_pnl_pct = float(history_df["pnl_pct"].mean())
         realized_pnl = float(history_df["pnl"].sum())
 
+    dividend_income = float(snapshot["dividend_income"])
     unrealized_pnl = float(snapshot["unrealized_pnl"])
-    total_pnl = realized_pnl + unrealized_pnl
+    total_pnl = realized_pnl + unrealized_pnl + dividend_income
     total_return_pct = float(snapshot["total_return_pct"])
     confidence_score = 55.0 if closed_count == 0 and open_rows else 50.0
     if closed_count > 0:
@@ -1360,11 +1549,11 @@ def render_performance_cards(open_rows: List[Dict[str, Any]], snapshot: Dict[str
     c1.metric("Net Sermaye", format_price(snapshot["net_capital"]), f"Giriş {format_price(snapshot['deposits'])} / Çıkış {format_price(snapshot['withdrawals'])}")
     c2.metric("Toplam Varlık", format_price(snapshot["current_equity"]), f"Sistem %{round(float(total_return_pct), 2)}")
     c3.metric("Gerçekleşen K/Z", format_price(realized_pnl), f"{closed_count} kapanan işlem")
-    c4.metric("Açık K/Z", format_price(unrealized_pnl), f"{len(open_rows)} açık işlem")
+    c4.metric("Net Temettü", format_price(dividend_income), "Portföye geçen nakit")
 
     d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Toplam K/Z", format_price(total_pnl), "Açık + kapanan")
-    d2.metric("Başarılı İşlem Oranı", f"%{round(float(win_rate), 1)}", f"Ort. %{round(float(avg_pnl_pct), 2)}")
+    d1.metric("Vergi Sonrası K/Z", format_price(snapshot["after_tax_total_pnl"]), f"Tahmini %{round(float(snapshot['after_tax_return_pct']), 2)}")
+    d2.metric("Tahmini Vergi", format_try(snapshot["estimated_tax_try"]), f"Oran %{round(float(snapshot['estimated_tax_rate']), 1)}")
     d3.metric("En İyi Açık Pozisyon", best_asset, format_price(best_asset_pnl) if best_asset_pnl is not None else "-")
     d4.metric("Atlas Güven Skoru", f"{round(float(confidence_score), 0)}/100", "İç metrik")
 
@@ -1389,11 +1578,15 @@ def render_history_tab() -> None:
     if hist.empty:
         st.info("Henüz kapatılmış işlem yok.")
     else:
+        tax_summary = calculate_estimated_tax(hist)
+        st.info(f"Tahmini vergiye esas kâr: {format_try(tax_summary['taxable_profit_try'])} · Tahmini vergi etkisi: {format_try(tax_summary['estimated_tax_try'])}")
         show = hist.copy()
         for col in ["entry_price", "exit_price", "pnl"]:
             show[col] = show[col].apply(lambda x: format_price(float(x)))
+        if "pnl_try" in show.columns:
+            show["pnl_try"] = show["pnl_try"].apply(lambda x: format_try(float(x)))
         show["pnl_pct"] = show["pnl_pct"].apply(lambda x: f"%{round(float(x), 2)}")
-        cols = [c for c in ["symbol", "source", "asset_type", "entry_price", "exit_price", "pnl", "pnl_pct", "closed_at"] if c in show.columns]
+        cols = [c for c in ["symbol", "source", "asset_type", "entry_price", "exit_price", "pnl", "pnl_try", "pnl_pct", "closed_at"] if c in show.columns]
         st.dataframe(show[cols], use_container_width=True, hide_index=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1486,6 +1679,15 @@ class TestAtlasMoney(unittest.TestCase):
     def test_suggest_initial_portfolio_count(self):
         suggestions = suggest_initial_portfolio("Dengeli")
         self.assertEqual(len(suggestions), 5)
+
+    def test_calculate_estimated_tax(self):
+        hist = pd.DataFrame({"pnl_try": [1000.0, -200.0, 500.0]})
+        out = calculate_estimated_tax(hist)
+        self.assertGreaterEqual(out["estimated_tax_try"], 0.0)
+
+    def test_dividend_summary_empty(self):
+        out = get_dividend_summary()
+        self.assertIn("net_dividends", out)
 
 
 def run_tests() -> int:
