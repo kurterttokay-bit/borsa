@@ -141,6 +141,23 @@ def init_db() -> None:
     conn.close()
 
 
+def get_app_state(key: str, default: str = "") -> str:
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return default if row is None else str(row[0])
+
+
+def set_app_state(key: str, value: str) -> None:
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, str(value)),
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_initial_cash() -> float:
     conn = sqlite3.connect(DB_PATH)
     row = conn.execute("SELECT value FROM app_state WHERE key='initial_cash'").fetchone()
@@ -516,8 +533,14 @@ def render_topbar() -> None:
 
 
 def onboarding_sidebar() -> Tuple[str, bool]:
+    persisted_ready = get_app_state("onboarding_tamam", "0") == "1"
+    persisted_profile = get_app_state("profil", "Dengeli")
+
     if "onboarding_tamam" not in st.session_state:
-        st.session_state["onboarding_tamam"] = False
+        st.session_state["onboarding_tamam"] = persisted_ready
+    if "profil" not in st.session_state:
+        st.session_state["profil"] = persisted_profile
+
     st.sidebar.markdown("## Başlangıç")
     if not st.session_state["onboarding_tamam"]:
         s1 = st.sidebar.selectbox("Yatırım süreniz", ["3-6 ay", "6-12 ay", "1 yıl +"], index=1)
@@ -528,15 +551,22 @@ def onboarding_sidebar() -> Tuple[str, bool]:
         if st.sidebar.button("Portföyü Başlat", use_container_width=True):
             st.session_state["onboarding_tamam"] = True
             st.session_state["profil"] = profile_name
-            set_initial_cash(INITIAL_CASH)
+            set_app_state("onboarding_tamam", "1")
+            set_app_state("profil", profile_name)
+            if get_app_state("initial_cash", "") == "":
+                set_initial_cash(INITIAL_CASH)
             st.rerun()
         return profile_name, False
-    profile_name = st.session_state.get("profil", "Dengeli")
+
+    profile_name = st.session_state.get("profil", persisted_profile)
     st.sidebar.markdown("## Portföy Menüsü")
     st.sidebar.markdown(f"**Aktif Profil:** {profile_name}")
     st.sidebar.markdown(f"**Başlangıç Bakiye:** {format_price(get_initial_cash())}")
     if st.sidebar.button("Profili Sıfırla", use_container_width=True):
         st.session_state["onboarding_tamam"] = False
+        st.session_state["profil"] = "Dengeli"
+        set_app_state("onboarding_tamam", "0")
+        set_app_state("profil", "Dengeli")
         st.rerun()
     return profile_name, True
 
