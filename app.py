@@ -707,41 +707,127 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
 
 def render_initial_portfolio_builder(profile_name: str) -> None:
     suggestions = suggest_initial_portfolio(profile_name)
+    if "atlas_secili_portfoy" not in st.session_state:
+        st.session_state["atlas_secili_portfoy"] = {}
+
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Atlas Önerilen Başlangıç Portföyü</div><div class="section-sub">Profiline göre seçilen 3 hisse + 1 değerli metal + 1 PPF / nakit park alanı. Dilersen önerilen oranla hızlı ekle, dilersen oranı revize ederek forma aktar.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Önerilen Başlangıç Portföyü</div><div class="section-sub">Önce hangi varlıkları istediğini seç. Sonra Atlas bunları önerilen oranlarla hazırlasın. Midas\'ta alımı yaptıktan sonra tik atıp portföye ekle.</div>', unsafe_allow_html=True)
+
     show_df = pd.DataFrame([{k: v for k, v in item.items() if k in ["Varlık", "Tür", "Pay Yazı", "Not"]} for item in suggestions]).rename(columns={"Pay Yazı": "Pay"})
     st.dataframe(show_df, use_container_width=True, hide_index=True)
+
+    st.markdown("#### 1) Portföy adaylarını seç")
     for idx, item in enumerate(suggestions):
-        c1, c2, c3 = st.columns([1.2, 1.2, 2.6])
-        with c1:
-            if st.button(f"{item['Varlık']} önerilenle ekle", key=f"onerilen_ekle_{item['Varlık']}_{idx}", use_container_width=True):
-                ham = download_symbol(item["Varlık"], "1G")
-                if ham.empty:
-                    st.warning(f"{item['Varlık']} için fiyat alınamadı. 'Oranı revize et' ile manuel ekleyebilirsin.")
-                else:
-                    fiyat = float(ham["Close"].iloc[-1])
-                    ayrilan_tutar = get_initial_cash() * float(item["Pay"])
-                    adet = max(round(ayrilan_tutar / max(fiyat, 1e-9), 4), 0.0001)
-                    add_portfolio_position(
-                        item["Varlık"],
-                        fiyat,
-                        adet,
-                        f"Atlas önerisi · {item['Not']} · Önerilen pay {item['Pay Yazı']}",
-                        "ATLAS TRADE",
-                        float(item["Pay"]),
-                    )
-                    st.success(f"{item['Varlık']} portföye Atlas önerisi olarak eklendi. Artık takip ve yönlendirme başlayacak.")
+        sembol = item["Varlık"]
+        varsayilan = st.session_state["atlas_secili_portfoy"].get(sembol, False)
+        secildi = st.checkbox(
+            f"{sembol} · {item['Tür']} · {item['Pay Yazı']}",
+            value=varsayilan,
+            key=f"atlas_select_{sembol}_{idx}",
+        )
+        st.session_state["atlas_secili_portfoy"][sembol] = secildi
+        st.caption(item["Not"])
+
+    secilenler = [item for item in suggestions if st.session_state["atlas_secili_portfoy"].get(item["Varlık"], False)]
+
+    if secilenler:
+        st.markdown("#### 2) Seçilen işlemleri hazırla")
+        if st.button("Seçilen işlemleri hazırla", use_container_width=True, key="atlas_hazirla_btn"):
+            hazir_listesi = []
+            for item in secilenler:
+                hazir_listesi.append(
+                    {
+                        "Varlık": item["Varlık"],
+                        "Tür": item["Tür"],
+                        "Pay": item["Pay"],
+                        "Pay Yazı": item["Pay Yazı"],
+                        "Not": item["Not"],
+                        "Midas Alındı": False,
+                        "Alış Fiyatı": 0.0,
+                        "Adet": 0.0,
+                    }
+                )
+            st.session_state["atlas_hazir_portfoy"] = hazir_listesi
+            st.success("Seçilen varlıklar hazırlandı. Şimdi Midas'ta alım yapıp aşağıdan işlemleri portföye ekleyebilirsin.")
+            st.rerun()
+
+    hazir_portfoy = st.session_state.get("atlas_hazir_portfoy", [])
+    if hazir_portfoy:
+        st.markdown("#### 3) Midas alımını onayla ve portföye ekle")
+        baslangic_bakiye = get_initial_cash()
+        for idx, item in enumerate(hazir_portfoy):
+            sembol = item["Varlık"]
+            st.markdown(f"**{sembol}** · {item['Tür']} · Önerilen pay {item['Pay Yazı']}")
+            c1, c2, c3, c4 = st.columns([1.1, 1, 1, 1.2])
+            with c1:
+                midas_alindi = st.checkbox("Midas'ta aldım", value=item.get("Midas Alındı", False), key=f"midas_alindi_{sembol}_{idx}")
+            with c2:
+                alis_fiyati = st.number_input("Alış fiyatı", min_value=0.0, value=float(item.get("Alış Fiyatı", 0.0)), step=0.01, key=f"alis_fiyati_{sembol}_{idx}")
+            with c3:
+                varsayilan_tutar = baslangic_bakiye * float(item["Pay"])
+                varsayilan_adet = 0.0 if alis_fiyati <= 0 else round(varsayilan_tutar / max(alis_fiyati, 1e-9), 4)
+                adet = st.number_input("Adet", min_value=0.0, value=float(item.get("Adet", varsayilan_adet)), step=0.0001, key=f"adet_{sembol}_{idx}")
+            with c4:
+                pozisyon_degeri = alis_fiyati * adet
+                st.markdown(f"Pozisyon değeri: **{format_price(pozisyon_degeri)}**")
+
+            item["Midas Alındı"] = midas_alindi
+            item["Alış Fiyatı"] = alis_fiyati
+            item["Adet"] = adet
+
+            c5, c6 = st.columns([1, 1])
+            with c5:
+                if st.button(f"{sembol} portföye ekle", key=f"tekli_portfoy_ekle_{sembol}_{idx}", use_container_width=True):
+                    if not midas_alindi:
+                        st.warning(f"Önce {sembol} için Midas alımını onayla.")
+                    elif alis_fiyati <= 0 or adet <= 0:
+                        st.warning(f"{sembol} için alış fiyatı ve adet girmen gerekiyor.")
+                    else:
+                        add_portfolio_position(
+                            sembol,
+                            alis_fiyati,
+                            adet,
+                            f"Atlas önerisi · {item['Not']} · Önerilen pay {item['Pay Yazı']}",
+                            "ATLAS TRADE",
+                            float(item["Pay"]),
+                        )
+                        st.success(f"{sembol} portföye eklendi. Atlas artık bu işlemi izleyecek.")
+                        st.session_state["atlas_hazir_portfoy"] = [x for x in hazir_portfoy if x["Varlık"] != sembol]
+                        st.rerun()
+            with c6:
+                if st.button(f"{sembol} oranı revize et", key=f"tekli_revize_{sembol}_{idx}", use_container_width=True):
+                    st.session_state["portfolio_prefill_symbol"] = sembol
+                    st.session_state["portfolio_prefill_weight"] = item["Pay Yazı"]
+                    st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
+                    st.session_state["portfolio_prefill_note"] = f"Atlas önerisi · {item['Not']}"
+                    st.info(f"{sembol} düzenlenebilir şekilde yeni işlem formuna aktarıldı.")
+
+        if hazir_portfoy:
+            st.markdown("#### 4) Toplu işlem")
+            if st.button("Midas'ta aldığım seçili işlemleri toplu ekle", use_container_width=True, key="toplu_midas_ekle"):
+                eklendi = 0
+                kalanlar = []
+                for item in hazir_portfoy:
+                    if item.get("Midas Alındı") and float(item.get("Alış Fiyatı", 0)) > 0 and float(item.get("Adet", 0)) > 0:
+                        add_portfolio_position(
+                            item["Varlık"],
+                            float(item["Alış Fiyatı"]),
+                            float(item["Adet"]),
+                            f"Atlas önerisi · {item['Not']} · Önerilen pay {item['Pay Yazı']}",
+                            "ATLAS TRADE",
+                            float(item["Pay"]),
+                        )
+                        eklendi += 1
+                    else:
+                        kalanlar.append(item)
+                st.session_state["atlas_hazir_portfoy"] = kalanlar
+                if eklendi > 0:
+                    st.success(f"{eklendi} işlem portföye eklendi. Atlas artık takip ve yönlendirme yapacak.")
                     st.rerun()
-        with c2:
-            if st.button(f"{item['Varlık']} oranı revize et", key=f"revize_ekle_{item['Varlık']}_{idx}", use_container_width=True):
-                st.session_state["portfolio_prefill_symbol"] = item["Varlık"]
-                st.session_state["portfolio_prefill_weight"] = item["Pay Yazı"]
-                st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
-                st.session_state["portfolio_prefill_note"] = f"Atlas önerisi · {item['Not']}"
-                st.info(f"{item['Varlık']} düzenlenebilir şekilde yeni işlem formuna aktarıldı.")
-        with c3:
-            st.caption(f"Tür: {item['Tür']} · Önerilen pay: {item['Pay Yazı']} · {item['Not']}")
-    st.markdown("**Akış:** Önce varlığı seç, önerilen payı kabul et ya da değiştir, sonra Midas'tan aldığın gerçek fiyatı gir. Atlas bundan sonra portföyü izleyip yön vermeye başlar.")
+                else:
+                    st.warning("Toplu ekleme için önce Midas alımını işaretleyip fiyat ve adet girmen gerekiyor.")
+
+    st.markdown("**Akış:** Önce seç, sonra Midas'ta al, ardından tik atıp fiyat ve adedi girerek portföye ekle. Atlas bundan sonra portföyü izleyip yön vermeye başlar.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 
