@@ -510,7 +510,7 @@ def build_radar(profile_name: str, timeframe: str = "1G", limit: int = 3) -> pd.
     return pd.DataFrame(rows).sort_values(["Atlas Skoru", "Risk/Getiri"], ascending=[False, False]).head(limit).reset_index(drop=True)
 
 
-@st.cache_data(show_spinner=False)
+@cache_data(show_spinner=False)
 def suggest_initial_portfolio(profile_name: str) -> List[Dict[str, Any]]:
     radar = build_radar(profile_name, "1G", 6)
     stock_rows: List[Dict[str, Any]] = []
@@ -591,6 +591,19 @@ def render_topbar() -> None:
                 <div class="nav-pill">Aksiyon Merkezi</div>
                 <div class="nav-pill">İşlem Geçmişi</div>
             </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_flow_hint(label: str) -> None:
+    st.markdown(
+        f"""
+        <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin:10px 0 14px 0;color:#93C5FD;font-weight:800;">
+            <span style="font-size:1.1rem;">↓</span>
+            <span>{label}</span>
+            <span style="font-size:1.1rem;">↓</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -818,7 +831,8 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
                     st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
                     st.session_state["portfolio_prefill_note"] = f"Atlas fırsatı · Skor %{row['Atlas Skoru']}"
                     st.session_state["portfolio_prefill_pending"] = True
-                    st.success(f"{row['Sembol']} yeni işlem formuna aktarıldı.")
+                    st.session_state["active_page"] = "Yeni İşlem"
+                    st.success(f"{row['Sembol']} yeni işlem ekranına aktarıldı.")
                     st.rerun()
             with c2:
                 st.caption(f"Stop: {format_price(row['Stop'])} · Hedef: {format_price(row['Hedef'])}")
@@ -838,7 +852,8 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
                     st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
                     st.session_state["portfolio_prefill_note"] = f"Atlas artırma fırsatı · Skor %{row['Atlas Skoru']}"
                     st.session_state["portfolio_prefill_pending"] = True
-                    st.success(f"{row['Sembol']} artırma için yeni işlem formuna aktarıldı.")
+                    st.session_state["active_page"] = "Yeni İşlem"
+                    st.success(f"{row['Sembol']} artırma için yeni işlem ekranına aktarıldı.")
                     st.rerun()
             with c2:
                 st.caption(f"Stop: {format_price(row['Stop'])} · Hedef: {format_price(row['Hedef'])}")
@@ -888,7 +903,7 @@ def render_initial_portfolio_builder(profile_name: str) -> None:
     ]
 
     if selectable_suggestions:
-        st.markdown("#### 1) Portföy adaylarını seç")
+        st.markdown("#### Portföy adaylarını seç")
 
         for idx, item in enumerate(selectable_suggestions):
             sembol = item["Varlık"]
@@ -908,7 +923,7 @@ def render_initial_portfolio_builder(profile_name: str) -> None:
         ]
 
         if secilenler:
-            st.markdown("#### 2) Seçilen işlemleri hazırla")
+            render_flow_hint("Seçilen işlemleri hazırla")
             if st.button("Seçilen işlemleri hazırla", use_container_width=True, key="atlas_hazirla_btn"):
                 mevcutlar = {x["Varlık"] for x in st.session_state["atlas_hazir_portfoy"]}
 
@@ -933,7 +948,7 @@ def render_initial_portfolio_builder(profile_name: str) -> None:
                 st.rerun()
 
     if hazir_portfoy:
-        st.markdown("#### 3) Midas alımını onayla ve portföye ekle")
+        render_flow_hint("Midas'tan aldığın işlemleri onayla ve portföye ekle")
         baslangic_bakiye = get_initial_cash()
         silinecekler: List[str] = []
 
@@ -1007,8 +1022,8 @@ def render_initial_portfolio_builder(profile_name: str) -> None:
             st.markdown("---")
 
         if hazir_portfoy:
-            st.markdown("#### 4) Toplu işlem")
-            if st.button("Midas'ta aldığım seçili işlemleri toplu ekle", use_container_width=True, key="toplu_midas_ekle"):
+            render_flow_hint("Midas'tan aldığım seçili işlemleri toplu ekle")
+            if st.button("Midas'tan aldığım seçili işlemleri toplu ekle", use_container_width=True, key="toplu_midas_ekle"):
                 eklendi = 0
                 kalanlar = []
                 for item in st.session_state["atlas_hazir_portfoy"]:
@@ -1229,26 +1244,35 @@ def main_streamlit() -> None:
     if not ready:
         st.markdown('<div class="card"><div class="section-title">Atlas ile Başlangıç</div><div class="section-sub">3 kısa sorudan sonra sana uygun profil belirlenir. Ardından Atlas sana Türkçe ve sade bir başlangıç portföyü önerir.</div></div>', unsafe_allow_html=True)
         return
-    col_a, col_b = st.columns([6, 1])
-    with col_b:
-        if st.button("Yenile", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-    tabs = st.tabs(["👜 Portföy", "➕ Yeni İşlem", "🗃️ Geçmiş"])
+
+    page_options = ["Portföy", "Yeni İşlem", "Geçmiş"]
+    if "active_page" not in st.session_state or st.session_state["active_page"] not in page_options:
+        st.session_state["active_page"] = "Portföy"
+
+    st.sidebar.markdown("## Görünüm")
+    st.sidebar.radio("Sayfalar", page_options, key="active_page", label_visibility="collapsed")
+    if st.sidebar.button("Önbelleği Temizle / Yenile", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+    active_page = st.session_state["active_page"]
     open_rows, invested_now = build_open_positions()
-    with tabs[0]:
+
+    if active_page == "Portföy":
         if not open_rows:
             render_initial_portfolio_builder(profile_name)
-        if st.session_state.get("portfolio_prefill_pending", False):
-            render_add_position(DEFAULT_SYMBOLS[0])
         portfolio_value, cash, riskable = render_portfolio_overview(open_rows, invested_now)
         render_open_positions(open_rows, portfolio_value)
         render_action_center(open_rows, cash, riskable, profile_name)
         render_performance_cards(open_rows, portfolio_value)
         render_cashflow_calendar(open_rows)
-    with tabs[1]:
+
+    elif active_page == "Yeni İşlem":
         render_add_position(DEFAULT_SYMBOLS[0])
-    with tabs[2]:
+        if not open_rows:
+            render_initial_portfolio_builder(profile_name)
+
+    elif active_page == "Geçmiş":
         render_history_tab()
 
 
