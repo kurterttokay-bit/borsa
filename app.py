@@ -1111,31 +1111,6 @@ def render_cashflow_calendar(open_rows: List[Dict[str, Any]]) -> None:
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-def render_correlation_matrix(open_rows: List[Dict[str, Any]]) -> None:
-    symbols = [r["Sembol"] for r in open_rows if r.get("Varlık Türü") in ["Hisse", "ETF", "Altın ETF", "Tahvil ETF"]][:5]
-    if len(symbols) < 2:
-        return
-    series_map: Dict[str, pd.Series] = {}
-    for sym in symbols:
-        raw = download_symbol(sym, "1G")
-        if raw.empty:
-            continue
-        returns = raw["Close"].pct_change().dropna().tail(90)
-        if not returns.empty:
-            series_map[sym] = returns
-    if len(series_map) < 2:
-        return
-    corr_df = pd.DataFrame(series_map).corr().round(2)
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Korelasyon Matrisi</div><div class="section-sub">Portföyündeki ilk 5 varlığın ne kadar benzer hareket ettiğini gösterir.</div>', unsafe_allow_html=True)
-    if PLOTLY_AVAILABLE:
-        fig = go.Figure(data=go.Heatmap(z=corr_df.values, x=corr_df.columns, y=corr_df.index, zmin=-1, zmax=1))
-        fig.update_layout(height=360, template="plotly_dark", paper_bgcolor="#111827", plot_bgcolor="#111827", margin=dict(l=10, r=10, t=20, b=10))
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.dataframe(corr_df, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
 
 def render_history_tab() -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -1172,7 +1147,6 @@ def main_streamlit() -> None:
         render_action_center(open_rows, cash, riskable, profile_name)
         render_performance_cards(open_rows, portfolio_value)
         render_cashflow_calendar(open_rows)
-        render_correlation_matrix(open_rows)
     with tabs[1]:
         render_add_position(DEFAULT_SYMBOLS[0])
     with tabs[2]:
