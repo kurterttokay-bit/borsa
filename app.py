@@ -1577,7 +1577,7 @@ def main_streamlit() -> None:
     else:
         st.info("Profile uygun potansiyelli işlem bulunamadı.")
 
-    tabs = st.tabs(["📊 Radar", "📈 Grafik", "👜 Portföy", "🔔 Alarm", "🗃️ Geçmiş"])
+    tabs = st.tabs(["👜 Portföy", "📊 Radar", "📈 Grafik", "🔔 Alarm", "🗃️ Geçmiş"])
 
     with tabs[0]:
         st.markdown('<div class="panel-card"><div class="section-title">Radar Tablosu</div><div class="section-sub">Daha detaylı tarama görünümü.</div>', unsafe_allow_html=True)
