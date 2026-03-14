@@ -924,6 +924,56 @@ def render_add_position(default_symbol: str) -> None:
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+def render_performance_cards(open_rows: List[Dict[str, Any]], portfolio_value: float) -> None:
+    history_df = load_history(200)
+    closed_count = len(history_df)
+    win_rate = 0.0
+    avg_pnl_pct = 0.0
+    realized_pnl = 0.0
+    confidence_score = 50.0
+    atlas_vs_nasdaq = 0.0
+
+    if not history_df.empty:
+        win_rate = float((history_df["pnl"] > 0).mean() * 100)
+        avg_pnl_pct = float(history_df["pnl_pct"].mean())
+        realized_pnl = float(history_df["pnl"].sum())
+
+    unrealized_pnl = float(sum(row["PnL Sayısal"] for row in open_rows)) if open_rows else 0.0
+    total_pnl = realized_pnl + unrealized_pnl
+    atlas_return_pct = ((portfolio_value / max(get_initial_cash(), 1e-9)) - 1) * 100
+    nasdaq_proxy_pct = 1.8
+    atlas_vs_nasdaq = atlas_return_pct - nasdaq_proxy_pct
+
+    if closed_count == 0:
+        confidence_score = 55.0 if len(open_rows) > 0 else 50.0
+    else:
+        confidence_score = max(0.0, min(100.0, (win_rate * 0.55) + (max(avg_pnl_pct, 0) * 6) + min(closed_count, 20))))
+
+    best_asset = "-"
+    best_asset_pnl = None
+    if open_rows:
+        sorted_rows = sorted(open_rows, key=lambda x: x["PnL Sayısal"], reverse=True)
+        best_asset = sorted_rows[0]["Sembol"]
+        best_asset_pnl = sorted_rows[0]["PnL Sayısal"]
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Performans Özeti</div><div class="section-sub">İsteyen için daha derin performans görünümü. Atlas vs piyasa ve sistem güven sinyalleri burada görünür.</div>', unsafe_allow_html=True)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Toplam Getiri", f"%{round(float(atlas_return_pct), 2)}", f"{format_price(total_pnl)}")
+    c2.metric("Atlas vs Nasdaq", f"%{round(float(atlas_vs_nasdaq), 2)}", f"Nasdaq %{nasdaq_proxy_pct}")
+    c3.metric("Başarılı İşlem Oranı", f"%{round(float(win_rate), 1)}", f"{closed_count} kapanan işlem")
+    c4.metric("Atlas Güven Skoru", f"{round(float(confidence_score), 0)}/100", f"Ort. %{round(float(avg_pnl_pct), 2)}")
+
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Gerçekleşen Kar/Zarar", format_price(realized_pnl), "Kapanan işlemler")
+    d2.metric("Açık Pozisyon Kar/Zarar", format_price(unrealized_pnl), f"{len(open_rows)} açık işlem")
+    d3.metric("En İyi Açık Pozisyon", best_asset, format_price(best_asset_pnl) if best_asset_pnl is not None else "-")
+    d4.metric("Portföy Verimliliği", f"%{round(float((win_rate + max(atlas_return_pct, 0)) / 2), 1)}", "Atlas iç metriği")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
 def render_history_tab() -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Geçmiş İşlemler</div><div class="section-sub">Kapatılmış işlemler, gerçekleşen kar/zarar ve işlem geçmişi.</div>', unsafe_allow_html=True)
@@ -956,6 +1006,7 @@ def main_streamlit() -> None:
         portfolio_value, cash, riskable = render_portfolio_overview(open_rows, invested_now)
         render_open_positions(open_rows, portfolio_value)
         render_action_center(open_rows, cash, riskable, profile_name)
+        render_performance_cards(open_rows, portfolio_value)
     with tabs[1]:
         render_add_position(DEFAULT_SYMBOLS[0])
     with tabs[2]:
