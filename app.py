@@ -817,7 +817,9 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
                     st.session_state["portfolio_prefill_weight"] = "%15"
                     st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
                     st.session_state["portfolio_prefill_note"] = f"Atlas fırsatı · Skor %{row['Atlas Skoru']}"
+                    st.session_state["portfolio_prefill_pending"] = True
                     st.success(f"{row['Sembol']} yeni işlem formuna aktarıldı.")
+                    st.rerun()
             with c2:
                 st.caption(f"Stop: {format_price(row['Stop'])} · Hedef: {format_price(row['Hedef'])}")
 
@@ -835,7 +837,9 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
                     st.session_state["portfolio_prefill_weight"] = row['Hedef Pay']
                     st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
                     st.session_state["portfolio_prefill_note"] = f"Atlas artırma fırsatı · Skor %{row['Atlas Skoru']}"
+                    st.session_state["portfolio_prefill_pending"] = True
                     st.success(f"{row['Sembol']} artırma için yeni işlem formuna aktarıldı.")
+                    st.rerun()
             with c2:
                 st.caption(f"Stop: {format_price(row['Stop'])} · Hedef: {format_price(row['Hedef'])}")
 
@@ -1002,6 +1006,43 @@ def render_initial_portfolio_builder(profile_name: str) -> None:
 
             st.markdown("---")
 
+        if hazir_portfoy:
+            st.markdown("#### 4) Toplu işlem")
+            if st.button("Midas'ta aldığım seçili işlemleri toplu ekle", use_container_width=True, key="toplu_midas_ekle"):
+                eklendi = 0
+                kalanlar = []
+                for item in st.session_state["atlas_hazir_portfoy"]:
+                    if item.get("Midas Alındı") and float(item.get("Alış Fiyatı", 0)) > 0 and float(item.get("Adet", 0)) > 0:
+                        add_portfolio_position(
+                            item["Varlık"],
+                            float(item["Alış Fiyatı"]),
+                            float(item["Adet"]),
+                            f"Atlas önerisi · {item['Not']} · Önerilen pay {item['Pay Yazı']}",
+                            "ATLAS TRADE",
+                            float(item["Pay"]),
+                            item["Tür"],
+                            "",
+                        )
+                        eklendi += 1
+                    else:
+                        kalanlar.append(item)
+
+                st.session_state["atlas_hazir_portfoy"] = kalanlar
+                if eklendi > 0:
+                    # toplu eklenenlere ait widget state'lerini temizle
+                    aktif_semboller = {x["Varlık"] for x in kalanlar}
+                    for key in list(st.session_state.keys()):
+                        if key.startswith(("midas_alindi_", "alis_fiyati_", "adet_")):
+                            parcalar = key.split("_")
+                            if len(parcalar) >= 3:
+                                sembol = parcalar[-2] if parcalar[-1].isdigit() else parcalar[-1]
+                                if sembol not in aktif_semboller:
+                                    del st.session_state[key]
+                    st.success(f"{eklendi} işlem portföye eklendi. Atlas artık takip ve yönlendirme yapacak.")
+                    st.rerun()
+                else:
+                    st.warning("Toplu ekleme için önce Midas alımını işaretleyip fiyat ve adet girmen gerekiyor.")
+
         if silinecekler:
             sil_set = set(silinecekler)
             st.session_state["atlas_hazir_portfoy"] = [
@@ -1070,7 +1111,12 @@ def render_add_position(default_symbol: str) -> None:
         )
         if pct_after > 40:
             st.warning("Bu işlem portföyde çok büyük ağırlık oluşturuyor. Oranı veya adedi düşürmek daha sağlıklı olabilir.")
-        submitted = st.form_submit_button("Portföye Ekle", use_container_width=True)
+        s1, s2 = st.columns([1, 1])
+        with s1:
+            submitted = st.form_submit_button("Portföye Ekle", use_container_width=True)
+        with s2:
+            temizle = st.form_submit_button("Hazır Formu Temizle", use_container_width=True)
+
         if submitted:
             if symbol and entry > 0 and qty > 0:
                 add_portfolio_position(symbol, entry, qty, f"{note} · Önerilen pay {selected_weight}", source, selected_weight_value, asset_type, coupon_date)
@@ -1078,12 +1124,21 @@ def render_add_position(default_symbol: str) -> None:
                 st.session_state["portfolio_prefill_weight"] = selected_weight
                 st.session_state["portfolio_prefill_source"] = source
                 st.session_state["portfolio_prefill_note"] = note
+                st.session_state["portfolio_prefill_pending"] = False
                 if portfolio_after > get_initial_cash():
                     set_initial_cash(portfolio_after)
                 st.success(f"{symbol} portföye eklendi. Atlas artık bu işlemi izleyecek.")
                 st.rerun()
             else:
                 st.warning("Varlık, alış fiyatı ve adet bilgisi gerekli.")
+
+        if temizle:
+            st.session_state["portfolio_prefill_pending"] = False
+            st.session_state["portfolio_prefill_symbol"] = default_symbol
+            st.session_state["portfolio_prefill_weight"] = "%20"
+            st.session_state["portfolio_prefill_source"] = "KULLANICI"
+            st.session_state["portfolio_prefill_note"] = "Midas işlemi"
+            st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -1184,6 +1239,8 @@ def main_streamlit() -> None:
     with tabs[0]:
         if not open_rows:
             render_initial_portfolio_builder(profile_name)
+        if st.session_state.get("portfolio_prefill_pending", False):
+            render_add_position(DEFAULT_SYMBOLS[0])
         portfolio_value, cash, riskable = render_portfolio_overview(open_rows, invested_now)
         render_open_positions(open_rows, portfolio_value)
         render_action_center(open_rows, cash, riskable, profile_name)
