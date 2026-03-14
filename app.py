@@ -34,7 +34,7 @@ except ModuleNotFoundError:
 APP_TITLE = "Atlas Money"
 APP_SUBTITLE = "Piyasaları Sadeleştirir"
 DB_PATH = "signals.db"
-INITIAL_CASH = 100.0
+INITIAL_CASH = 0.0
 
 TIMEFRAME_MAP = {
     "1G": {"interval": "1d", "period": "2y"},
@@ -163,11 +163,16 @@ def init_db() -> None:
         cur.execute("ALTER TABLE trades_history ADD COLUMN asset_type TEXT DEFAULT 'Hisse'")
     conn.commit()
     conn.close()
+    maybe_sync_initial_cash_with_positions()
 
 
 def get_app_state(key: str, default: str = "") -> str:
     conn = sqlite3.connect(DB_PATH)
-    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+    try:
+        row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+    except sqlite3.OperationalError:
+        conn.close()
+        return default
     conn.close()
     return default if row is None else str(row[0])
 
@@ -182,26 +187,102 @@ def set_app_state(key: str, value: str) -> None:
     conn.close()
 
 
-def get_initial_cash() -> float:
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute("SELECT value FROM app_state WHERE key='initial_cash'").fetchone()
-    conn.close()
-    if row is None:
-        return INITIAL_CASH
+def get_app_state_float(key: str, default: float = 0.0) -> float:
+    raw = get_app_state(key, "")
+    if raw == "":
+        return float(default)
     try:
-        return float(row[0])
+        return float(raw)
     except Exception:
-        return INITIAL_CASH
+        return float(default)
 
 
-def set_initial_cash(value: float) -> None:
+def get_display_currency() -> str:
+    value = get_app_state("display_currency", "USD").upper()
+    return value if value in ["USD", "TRY"] else "USD"
+
+
+def set_display_currency(value: str) -> None:
+    set_app_state("display_currency", value.upper())
+
+
+@cache_data(ttl=900, show_spinner=False)
+def get_usdtry_rate() -> float:
+    if YFINANCE_AVAILABLE:
+        try:
+            df = yf.download("USDTRY=X", period="5d", interval="1d", progress=False, threads=False, auto_adjust=False)
+            if df is not None and not df.empty:
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = [c[0] for c in df.columns]
+                close = pd.to_numeric(df["Close"], errors="coerce").dropna()
+                if not close.empty:
+                    return float(close.iloc[-1])
+        except Exception:
+            pass
+    fallback = get_app_state_float("manual_usdtry", 0.0)
+    return float(fallback) if fallback > 0 else 1.0
+
+
+def convert_money(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    currency = get_display_currency()
+    if currency == "TRY":
+        return float(value) * get_usdtry_rate()
+    return float(value)
+
+
+def infer_initial_cash() -> float:
+    open_df = load_open_portfolio()
+    if not open_df.empty:
+        try:
+            return float((pd.to_numeric(open_df["entry_price"], errors="coerce").fillna(0) * pd.to_numeric(open_df["quantity"], errors="coerce").fillna(0)).sum())
+        except Exception:
+            return 0.0
+    hist = load_history(500)
+    if not hist.empty:
+        try:
+            return float((pd.to_numeric(hist["entry_price"], errors="coerce").fillna(0) * pd.to_numeric(hist["quantity"], errors="coerce").fillna(0)).max())
+        except Exception:
+            return 0.0
+    return 0.0
+
+
+def get_initial_cash() -> float:
+    raw = get_app_state("initial_cash", "")
+    if raw != "":
+        try:
+            return float(raw)
+        except Exception:
+            pass
+    return infer_initial_cash()
+
+
+def set_initial_cash(value: float, source: str = "manual") -> None:
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         "INSERT INTO app_state (key, value) VALUES ('initial_cash', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (str(float(value)),),
     )
+    conn.execute(
+        "INSERT INTO app_state (key, value) VALUES ('initial_cash_source', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (source,),
+    )
     conn.commit()
     conn.close()
+
+
+def maybe_sync_initial_cash_with_positions() -> None:
+    if get_app_state("initial_cash_source", "") == "manual":
+        return
+    cash_df = load_cash_transactions()
+    if not cash_df.empty:
+        return
+    if not load_history(1).empty:
+        return
+    inferred = infer_initial_cash()
+    if inferred > 0:
+        set_initial_cash(inferred, source="auto")
 
 
 def add_cash_transaction(tx_type: str, amount: float, note: str = "") -> None:
@@ -337,10 +418,21 @@ def safe_float(value) -> Optional[float]:
     return float(value)
 
 
-def format_price(value: Optional[float]) -> str:
+def format_number(value: Optional[float]) -> str:
     if value is None:
         return "-"
-    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def format_price(value: Optional[float], is_money: bool = True) -> str:
+    if value is None:
+        return "-"
+    shown = convert_money(value) if is_money else float(value)
+    number = format_number(shown)
+    if not is_money:
+        return number
+    currency = get_display_currency()
+    return f"${number}" if currency == "USD" else f"₺{number}"
 
 
 def action_color(action: str) -> str:
@@ -633,15 +725,20 @@ def onboarding_sidebar() -> Tuple[str, bool]:
             st.session_state["profil"] = profile_name
             set_app_state("onboarding_tamam", "1")
             set_app_state("profil", profile_name)
-            if get_app_state("initial_cash", "") == "":
-                set_initial_cash(INITIAL_CASH)
             st.rerun()
         return profile_name, False
 
     profile_name = st.session_state.get("profil", persisted_profile)
     st.sidebar.markdown("## Atlas Menü")
     st.sidebar.markdown(f"**Aktif Profil:** {profile_name}")
-    st.sidebar.markdown(f"**İlk Sermaye:** {format_price(get_initial_cash())}")
+    current_currency = get_display_currency()
+    chosen_currency = st.sidebar.selectbox("Görüntüleme para birimi", ["USD", "TRY"], index=0 if current_currency == "USD" else 1)
+    if chosen_currency != current_currency:
+        set_display_currency(chosen_currency)
+        st.rerun()
+    usdtry = get_usdtry_rate()
+    st.sidebar.markdown(f"**Net Sermaye:** {format_price(get_initial_cash())}")
+    st.sidebar.caption(f"Kur: 1 USD ≈ ₺{format_number(usdtry)}")
     if st.sidebar.button("Profili Sıfırla", use_container_width=True):
         st.session_state["onboarding_tamam"] = False
         st.session_state["profil"] = "Dengeli"
@@ -719,9 +816,19 @@ def compute_portfolio_snapshot(open_rows: List[Dict[str, Any]], invested_now: fl
     flow = get_cash_flow_summary()
     net_capital = flow["net_capital"]
     unrealized_pnl = float(sum(r["PnL Sayısal"] for r in open_rows)) if open_rows else 0.0
+    realized_pnl = 0.0
+    history_df = load_history(500)
+    if not history_df.empty:
+        realized_pnl = float(pd.to_numeric(history_df["pnl"], errors="coerce").fillna(0).sum())
     portfolio_value = invested_now
-    current_equity = net_capital + unrealized_pnl
+    current_equity = net_capital + unrealized_pnl + realized_pnl
+    open_cost = float(sum(r["Giriş Değeri Sayısal"] for r in open_rows)) if open_rows else 0.0
     cash = max(0.0, current_equity - portfolio_value)
+    # ilk kurulumda henüz net sermaye set edilmediyse, ilk alımlara göre oturt
+    if get_app_state("initial_cash", "") == "" and open_cost > net_capital and flow["deposits"] == 0 and flow["withdrawals"] == 0 and history_df.empty:
+        net_capital = open_cost
+        current_equity = net_capital + unrealized_pnl
+        cash = max(0.0, current_equity - portfolio_value)
     riskable = cash * 0.5
     total_pnl = current_equity - net_capital
     total_return_pct = (total_pnl / max(net_capital, 1e-9)) * 100 if net_capital > 0 else 0.0
@@ -1367,7 +1474,7 @@ class TestAtlasMoney(unittest.TestCase):
         self.assertIsNotNone(rr)
 
     def test_format_price(self):
-        self.assertEqual(format_price(1000.5), "1.000,50")
+        self.assertIn("1.000,50", format_price(1000.5))
 
     def test_searchable_assets_contains_safe_assets(self):
         self.assertIn("GLD", SEARCHABLE_ASSETS)
