@@ -947,8 +947,10 @@ def render_performance_cards(open_rows: List[Dict[str, Any]], portfolio_value: f
     if closed_count == 0:
         confidence_score = 55.0 if len(open_rows) > 0 else 50.0
     else:
-        confidence_score = max(0.0, min(100.0, (win_rate * 0.55) + (max(avg_pnl_pct, 0) * 6) + min(closed_count, 20))))
-
+        confidence_score = max(
+    0.0,
+    min(100.0, (win_rate * 0.55) + (max(avg_pnl_pct, 0) * 6) + min(closed_count, 20))
+)
     best_asset = "-"
     best_asset_pnl = None
     if open_rows:
