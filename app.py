@@ -30,7 +30,7 @@ except ModuleNotFoundError:
     YFINANCE_AVAILABLE = False
 
 APP_TITLE = "Atlas Money"
-APP_SUBTITLE = "Markets Simplified"
+APP_SUBTITLE = "Piyasaları Sadeleştirir"
 DB_PATH = "signals.db"
 
 TIMEFRAME_MAP = {
@@ -635,6 +635,47 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+def suggest_initial_portfolio(profile_name: str) -> List[Dict[str, Any]]:
+    radar = build_radar(profile_name, "1G", 6)
+    stock_rows: List[Dict[str, Any]] = []
+    if not radar.empty:
+        for _, row in radar.head(3).iterrows():
+            stock_rows.append({
+                "Varlık": str(row["Sembol"]),
+                "Tür": "Hisse",
+                "Pay": "%20",
+                "Not": f"Atlas Skoru %{row['Atlas Skoru']} · Risk/Getiri {row['Risk/Getiri']}",
+            })
+    while len(stock_rows) < 3:
+        fallback = DEFAULT_SYMBOLS[len(stock_rows)]
+        stock_rows.append({
+            "Varlık": fallback,
+            "Tür": "Hisse",
+            "Pay": "%20",
+            "Not": "Başlangıç portföyü için güçlü ve likit aday",
+        })
+    return stock_rows + [
+        {"Varlık": "GLD", "Tür": "Altın ETF", "Pay": "%20", "Not": "Portföy dengesi ve güvenli liman"},
+        {"Varlık": "SGOV", "Tür": "PPF / Nakit Park", "Pay": "%20", "Not": "Boşta bekleyen fırsat sermayesi"},
+    ]
+
+
+def render_initial_portfolio_builder(profile_name: str) -> None:
+    suggestions = suggest_initial_portfolio(profile_name)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Önerilen Başlangıç Portföyü</div><div class="section-sub">Profiline göre seçilen 3 hisse + 1 değerli metal + 1 PPF / nakit park alanı. Önce bunu gör, sonra istersen kendi işlemlerini manuel ekle.</div>', unsafe_allow_html=True)
+    show_df = pd.DataFrame(suggestions)
+    st.dataframe(show_df, use_container_width=True, hide_index=True)
+    cols = st.columns(len(suggestions))
+    for idx, item in enumerate(suggestions):
+        with cols[idx]:
+            if st.button(f"{item['Varlık']} formuna aktar", key=f"oneri_{item['Varlık']}_{idx}", use_container_width=True):
+                st.session_state["portfolio_prefill_symbol"] = item["Varlık"]
+                st.success(f"{item['Varlık']} yeni işlem formuna aktarıldı.")
+    st.markdown("**Not:** Başlangıç portföyü bir zorunluluk değil. Dilersen sadece bazılarını kullanabilir, dilersen tamamen kendi portföyünü kurabilirsin.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
 def render_add_position(default_symbol: str) -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Yeni İşlem Ekle</div><div class="section-sub">Midas\'ta aldığın varlığı manuel ekle. Atlas bundan sonra takip etsin.</div>', unsafe_allow_html=True)
@@ -687,13 +728,15 @@ def main_streamlit() -> None:
 
     profile_name, ready = onboarding_sidebar()
     if not ready:
-        st.markdown('<div class="card"><div class="section-title">Atlas ile Başlangıç</div><div class="section-sub">3 kısa sorudan sonra sana uygun yatırım yaklaşımını belirleyip portföyünü sade şekilde yönetmeye başlayacağız.</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><div class="section-title">Atlas ile Başlangıç</div><div class="section-sub">3 kısa sorudan sonra sana uygun profil belirlenir. Ardından Atlas sana Türkçe ve sade bir başlangıç portföyü önerir.</div></div>', unsafe_allow_html=True)
         return
 
     tabs = st.tabs(["👜 Portföy", "➕ Yeni İşlem", "🗃️ Geçmiş"])
     open_rows = build_open_positions()
 
     with tabs[0]:
+        if not open_rows:
+            render_initial_portfolio_builder(profile_name)
         cash, riskable = render_portfolio_overview(open_rows)
         render_open_positions(open_rows)
         render_action_center(open_rows, cash, riskable, profile_name)
