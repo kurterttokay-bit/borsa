@@ -32,12 +32,10 @@ except ModuleNotFoundError:
 APP_TITLE = "Atlas Money"
 APP_SUBTITLE = "Piyasaları Sadeleştirir"
 DB_PATH = "signals.db"
+INITIAL_CASH = 100.0
 
 TIMEFRAME_MAP = {
     "1G": {"interval": "1d", "period": "2y"},
-    "1S": {"interval": "60m", "period": "90d"},
-    "4S": {"interval": "60m", "period": "180d"},
-    "1H": {"interval": "1wk", "period": "5y"},
 }
 
 US_MEGA_CAPS = [
@@ -49,7 +47,7 @@ US_GROWTH = [
     "ARM", "MRVL", "MSTR", "PYPL", "SQ", "CFLT", "FSLR", "ENPH", "DKNG", "ROKU",
 ]
 US_ETFS = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "SMH"]
-SAFE_ASSETS = ["GLD", "IAU", "TLT", "IEF", "SGOV", "BIL"]
+SAFE_ASSETS = ["GLD", "IAU", "TLT", "IEF", "SGOV", "BIL", "SLV"]
 RISKY_UNIVERSE = US_MEGA_CAPS + US_GROWTH + US_ETFS
 SEARCHABLE_ASSETS = sorted(list(set(RISKY_UNIVERSE + SAFE_ASSETS)))
 DEFAULT_SYMBOLS = US_MEGA_CAPS.copy()
@@ -101,6 +99,14 @@ def init_db() -> None:
     cur = conn.cursor()
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS app_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS portfolio (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             created_at TEXT,
@@ -109,6 +115,7 @@ def init_db() -> None:
             quantity REAL,
             note TEXT,
             source TEXT DEFAULT 'KULLANICI',
+            target_weight REAL DEFAULT 0,
             status TEXT DEFAULT 'open'
         )
         """
@@ -134,13 +141,42 @@ def init_db() -> None:
     conn.close()
 
 
-def add_portfolio_position(symbol: str, entry_price: float, quantity: float, note: str = "", source: str = "KULLANICI") -> None:
+def get_initial_cash() -> float:
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT value FROM app_state WHERE key='initial_cash'").fetchone()
+    conn.close()
+    if row is None:
+        return INITIAL_CASH
+    try:
+        return float(row[0])
+    except Exception:
+        return INITIAL_CASH
+
+
+def set_initial_cash(value: float) -> None:
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO app_state (key, value) VALUES ('initial_cash', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (str(float(value)),),
+    )
+    conn.commit()
+    conn.close()
+
+
+def add_portfolio_position(
+    symbol: str,
+    entry_price: float,
+    quantity: float,
+    note: str = "",
+    source: str = "KULLANICI",
+    target_weight: float = 0.0,
+) -> None:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO portfolio (created_at, symbol, entry_price, quantity, note, source, status)
-        VALUES (?, ?, ?, ?, ?, ?, 'open')
+        INSERT INTO portfolio (created_at, symbol, entry_price, quantity, note, source, target_weight, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'open')
         """,
         (
             datetime.now().isoformat(timespec="seconds"),
@@ -149,6 +185,7 @@ def add_portfolio_position(symbol: str, entry_price: float, quantity: float, not
             float(quantity),
             note,
             source,
+            float(target_weight),
         ),
     )
     conn.commit()
@@ -172,7 +209,10 @@ def load_history(limit: int = 100) -> pd.DataFrame:
 def close_portfolio_position(position_id: int, exit_price: float) -> None:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    row = cur.execute("SELECT created_at, symbol, entry_price, quantity, note, source FROM portfolio WHERE id = ?", (int(position_id),)).fetchone()
+    row = cur.execute(
+        "SELECT created_at, symbol, entry_price, quantity, note, source FROM portfolio WHERE id = ?",
+        (int(position_id),),
+    ).fetchone()
     if row is None:
         conn.close()
         return
@@ -212,17 +252,6 @@ def format_price(value: Optional[float]) -> str:
     if value is None:
         return "-"
     return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
-def verdict_color(verdict: str) -> str:
-    mapping = {
-        "GÜÇLÜ AL": "#10B981",
-        "AL": "#22C55E",
-        "İZLE": "#F59E0B",
-        "SAT": "#F97316",
-        "GÜÇLÜ SAT": "#EF4444",
-    }
-    return mapping.get(verdict, "#94A3B8")
 
 
 def action_color(action: str) -> str:
@@ -386,20 +415,53 @@ def build_radar(profile_name: str, timeframe: str = "1G", limit: int = 3) -> pd.
                 continue
             if result.verdict not in ["GÜÇLÜ AL", "AL"]:
                 continue
-            rows.append({
-                "Sembol": symbol,
-                "Atlas Skoru": result.market_strength,
-                "Karar": result.verdict,
-                "Fiyat": result.close,
-                "Risk/Getiri": result.rr_ratio,
-                "Stop": result.stop_loss,
-                "Hedef": result.take_profit,
-            })
+            rows.append(
+                {
+                    "Sembol": symbol,
+                    "Atlas Skoru": result.market_strength,
+                    "Karar": result.verdict,
+                    "Fiyat": result.close,
+                    "Risk/Getiri": result.rr_ratio,
+                    "Stop": result.stop_loss,
+                    "Hedef": result.take_profit,
+                }
+            )
         except Exception:
             continue
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows).sort_values(["Atlas Skoru", "Risk/Getiri"], ascending=[False, False]).head(limit).reset_index(drop=True)
+
+
+def suggest_initial_portfolio(profile_name: str) -> List[Dict[str, Any]]:
+    radar = build_radar(profile_name, "1G", 6)
+    stock_rows: List[Dict[str, Any]] = []
+    if not radar.empty:
+        for _, row in radar.head(3).iterrows():
+            stock_rows.append(
+                {
+                    "Varlık": str(row["Sembol"]),
+                    "Tür": "Hisse",
+                    "Pay": 0.20,
+                    "Pay Yazı": "%20",
+                    "Not": f"Atlas Skoru %{row['Atlas Skoru']} · Risk/Getiri {row['Risk/Getiri']}",
+                }
+            )
+    while len(stock_rows) < 3:
+        fallback = DEFAULT_SYMBOLS[len(stock_rows)]
+        stock_rows.append(
+            {
+                "Varlık": fallback,
+                "Tür": "Hisse",
+                "Pay": 0.20,
+                "Pay Yazı": "%20",
+                "Not": "Başlangıç portföyü için güçlü ve likit aday",
+            }
+        )
+    return stock_rows + [
+        {"Varlık": "GLD", "Tür": "Altın ETF", "Pay": 0.20, "Pay Yazı": "%20", "Not": "Portföy dengesi ve güvenli liman"},
+        {"Varlık": "SGOV", "Tür": "PPF / Nakit Park", "Pay": 0.20, "Pay Yazı": "%20", "Not": "Boşta bekleyen fırsat sermayesi"},
+    ]
 
 
 def inject_css() -> None:
@@ -415,7 +477,7 @@ def inject_css() -> None:
         .brand-sub { color:#94A3B8; font-size:0.92rem; margin-top:4px; }
         .nav-pills { display:flex; gap:10px; flex-wrap:wrap; }
         .nav-pill { padding:10px 14px; border-radius:999px; background:#1F2937; color:#CBD5E1; font-size:0.8rem; font-weight:700; }
-        .card { background:#111827; border:1px solid rgba(148,163,184,0.10); border-radius:20px; padding:18px; }
+        .card { background:#111827; border:1px solid rgba(148,163,184,0.10); border-radius:20px; padding:18px; margin-bottom:16px; }
         .section-title { color:#F8FAFC; font-size:1.02rem; font-weight:800; margin-bottom:8px; }
         .section-sub { color:#94A3B8; font-size:0.9rem; margin-bottom:12px; }
         .metric-grid { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:12px; }
@@ -466,25 +528,89 @@ def onboarding_sidebar() -> Tuple[str, bool]:
         if st.sidebar.button("Portföyü Başlat", use_container_width=True):
             st.session_state["onboarding_tamam"] = True
             st.session_state["profil"] = profile_name
+            set_initial_cash(INITIAL_CASH)
             st.rerun()
         return profile_name, False
     profile_name = st.session_state.get("profil", "Dengeli")
     st.sidebar.markdown("## Portföy Menüsü")
     st.sidebar.markdown(f"**Aktif Profil:** {profile_name}")
-    st.sidebar.markdown("**Portföy Türü:** Ana Portföy")
+    st.sidebar.markdown(f"**Başlangıç Bakiye:** {format_price(get_initial_cash())}")
     if st.sidebar.button("Profili Sıfırla", use_container_width=True):
         st.session_state["onboarding_tamam"] = False
         st.rerun()
     return profile_name, True
 
 
-def render_portfolio_overview(open_rows: List[Dict[str, Any]]) -> Tuple[float, float]:
-    invested = sum(row["Pozisyon Değeri Sayısal"] for row in open_rows)
-    cash = max(0.0, 100.0 - invested)
-    riskable = cash * 0.5
+def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
+    open_df = load_open_portfolio()
+    rows: List[Dict[str, Any]] = []
+    invested_now = 0.0
+    for _, row in open_df.iterrows():
+        symbol = str(row["symbol"])
+        raw = download_symbol(symbol, "1G")
+        current_price = None
+        pnl = 0.0
+        pnl_pct = 0.0
+        stop = None
+        target = None
+        action = "TUT"
+        alert = "Pozisyon izleniyor"
+        value = 0.0
+        if not raw.empty:
+            df_ind = add_indicators(raw)
+            current_price = float(df_ind["Close"].iloc[-1])
+            value = current_price * float(row["quantity"])
+            invested_now += value
+            pnl = (current_price - float(row["entry_price"])) * float(row["quantity"])
+            pnl_pct = ((current_price / float(row["entry_price"])) - 1) * 100 if float(row["entry_price"]) else 0.0
+            last_atr = safe_float(df_ind["ATR14"].iloc[-1]) or 0.0
+            stop = float(row["entry_price"]) - (1.5 * last_atr)
+            target = float(row["entry_price"]) + (3.0 * last_atr)
+            if current_price <= (stop or -999999):
+                action = "ÇIK"
+                alert = "Koruyucu stop altı, çıkış değerlendir"
+            elif pnl_pct >= 4:
+                action = "SATIŞ DÜŞÜN"
+                alert = "Hedef bölgesine yaklaşıyor"
+            elif pnl_pct <= -3:
+                action = "AZALT / DİKKAT"
+                alert = "Zarar artıyor, dikkat gerekli"
+            else:
+                action = "TUT"
+                alert = "Yapı korunuyor"
+        entry_value = float(row["entry_price"]) * float(row["quantity"])
+        rows.append(
+            {
+                "ID": int(row["id"]),
+                "Sembol": symbol,
+                "Kaynak": str(row["source"]),
+                "Alış": format_price(float(row["entry_price"])),
+                "Güncel": format_price(current_price) if current_price is not None else "-",
+                "Adet": float(row["quantity"]),
+                "Pozisyon Değeri Sayısal": value,
+                "Giriş Değeri Sayısal": entry_value,
+                "PnL": format_price(pnl),
+                "PnL %": f"%{round(float(pnl_pct), 2)}",
+                "% Portföy": "-",
+                "Durum": action,
+                "Stop": format_price(stop) if stop is not None else "-",
+                "Hedef": format_price(target) if target is not None else "-",
+                "Hedef Pay": f"%{round(float(row.get('target_weight', 0))*100, 0)}" if float(row.get("target_weight", 0)) > 0 else "-",
+                "Not": str(row["note"] or ""),
+                "Uyarı": alert,
+                "PnL Sayısal": pnl,
+            }
+        )
+    return rows, invested_now
+
+
+def render_portfolio_overview(open_rows: List[Dict[str, Any]], invested_now: float) -> Tuple[float, float, float]:
+    initial_cash = get_initial_cash()
     total_pnl = sum(row["PnL Sayısal"] for row in open_rows)
-    portfolio_value = invested + cash
-    pnl_pct = (total_pnl / 100.0) * 100 if 100.0 else 0.0
+    portfolio_value = initial_cash + total_pnl
+    cash = max(0.0, portfolio_value - invested_now)
+    riskable = cash * 0.5
+    pnl_pct = (total_pnl / max(initial_cash, 1e-9)) * 100
     risk = "DÜŞÜK" if len(open_rows) <= 2 else "ORTA" if len(open_rows) <= 3 else "YÜKSEK"
     risk_color = "#10B981" if risk == "DÜŞÜK" else "#F59E0B" if risk == "ORTA" else "#EF4444"
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -504,9 +630,9 @@ def render_portfolio_overview(open_rows: List[Dict[str, Any]]) -> Tuple[float, f
     if PLOTLY_AVAILABLE:
         hist_points = 14
         idx = pd.date_range(end=pd.Timestamp.today().normalize(), periods=hist_points, freq="D")
-        atlas = np.linspace(100 - max(total_pnl, 0) * 0.5, portfolio_value, hist_points)
-        nasdaq = np.linspace(100, 101.8, hist_points)
-        faiz = np.linspace(100, 100.35, hist_points)
+        atlas = np.linspace(initial_cash, portfolio_value, hist_points)
+        nasdaq = np.linspace(initial_cash, initial_cash * 1.018, hist_points)
+        faiz = np.linspace(initial_cash, initial_cash * 1.0035, hist_points)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=idx, y=atlas, mode="lines", name="Atlas"))
         fig.add_trace(go.Scatter(x=idx, y=nasdaq, mode="lines", name="NASDAQ"))
@@ -514,78 +640,19 @@ def render_portfolio_overview(open_rows: List[Dict[str, Any]]) -> Tuple[float, f
         fig.update_layout(height=300, template="plotly_dark", paper_bgcolor="#111827", plot_bgcolor="#111827", margin=dict(l=10, r=10, t=20, b=10), legend_orientation="h")
         st.plotly_chart(fig, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
-    return cash, riskable
+    return portfolio_value, cash, riskable
 
 
-def build_open_positions() -> List[Dict[str, Any]]:
-    open_df = load_open_portfolio()
-    rows: List[Dict[str, Any]] = []
-    for _, row in open_df.iterrows():
-        symbol = str(row["symbol"])
-        raw = download_symbol(symbol, "1G")
-        current_price = None
-        pnl = 0.0
-        pnl_pct = 0.0
-        stop = None
-        target = None
-        action = "TUT"
-        alert = "Pozisyon izleniyor"
-        value = 0.0
-        if not raw.empty:
-            df_ind = add_indicators(raw)
-            current_price = float(df_ind["Close"].iloc[-1])
-            value = current_price * float(row["quantity"])
-            pnl = (current_price - float(row["entry_price"])) * float(row["quantity"])
-            pnl_pct = ((current_price / float(row["entry_price"])) - 1) * 100 if float(row["entry_price"]) else 0.0
-            last_atr = safe_float(df_ind["ATR14"].iloc[-1]) or 0.0
-            stop = float(row["entry_price"]) - (1.5 * last_atr)
-            target = float(row["entry_price"]) + (3.0 * last_atr)
-            if current_price <= (stop or -999999):
-                action = "ÇIK"
-                alert = "Koruyucu stop altı, çıkış değerlendir"
-            elif pnl_pct >= 4:
-                action = "SATIŞ DÜŞÜN"
-                alert = "Hedef bölgesine yaklaşıyor"
-            elif pnl_pct <= -3:
-                action = "AZALT / DİKKAT"
-                alert = "Zarar artıyor, dikkat gerekli"
-            else:
-                action = "TUT"
-                alert = "Yapı korunuyor"
-        rows.append(
-            {
-                "ID": int(row["id"]),
-                "Sembol": symbol,
-                "Kaynak": str(row["source"]),
-                "Alış": format_price(float(row["entry_price"])),
-                "Güncel": format_price(current_price) if current_price is not None else "-",
-                "Adet": float(row["quantity"]),
-                "PnL": format_price(pnl),
-                "PnL %": f"%{round(float(pnl_pct), 2)}",
-                "% Portföy": "-",
-                "Durum": action,
-                "Stop": format_price(stop) if stop is not None else "-",
-                "Hedef": format_price(target) if target is not None else "-",
-                "Not": str(row["note"] or ""),
-                "Uyarı": alert,
-                "Pozisyon Değeri Sayısal": value,
-                "PnL Sayısal": pnl,
-            }
-        )
-    total_value = sum(r["Pozisyon Değeri Sayısal"] for r in rows) + max(0.0, 100.0 - sum(r["Pozisyon Değeri Sayısal"] for r in rows))
-    for r in rows:
-        r["% Portföy"] = f"%{round((r['Pozisyon Değeri Sayısal'] / max(total_value, 1e-9)) * 100, 2)}"
-    return rows
-
-
-def render_open_positions(rows: List[Dict[str, Any]]) -> None:
+def render_open_positions(rows: List[Dict[str, Any]], portfolio_value: float) -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Açık Pozisyonlar</div><div class="section-sub">Mevcut işlemlerini izle, aksiyon önerisini gör ve dilediğinde kapat.</div>', unsafe_allow_html=True)
     if not rows:
         st.info("Henüz açık pozisyon yok.")
         st.markdown('</div>', unsafe_allow_html=True)
         return
-    show_df = pd.DataFrame(rows)[["Sembol", "Kaynak", "Alış", "Güncel", "PnL", "PnL %", "% Portföy", "Durum", "Stop", "Hedef", "Not"]]
+    for row in rows:
+        row["% Portföy"] = f"%{round((row['Pozisyon Değeri Sayısal'] / max(portfolio_value, 1e-9)) * 100, 2)}"
+    show_df = pd.DataFrame(rows)[["Sembol", "Kaynak", "Alış", "Güncel", "PnL", "PnL %", "% Portföy", "Hedef Pay", "Durum", "Stop", "Hedef", "Not"]]
     st.dataframe(show_df, use_container_width=True, hide_index=True)
     st.markdown("#### Pozisyon Kapat")
     for row in rows[:5]:
@@ -604,90 +671,76 @@ def render_open_positions(rows: List[Dict[str, Any]]) -> None:
 def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: float, profile_name: str) -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Günlük Aksiyon Merkezi</div><div class="section-sub">Portföyüne göre bugün dikkat etmen gerekenler ve yeni öneriler.</div>', unsafe_allow_html=True)
-    alerts = rows[:]
-    if not alerts:
-        st.info("Aktif uyarı yok.")
+    if not rows:
+        st.info("Portföy boşsa önce Atlas başlangıç portföyünden veya yeni işlem ekranından pozisyon ekle.")
     else:
-        for item in alerts[:3]:
+        for item in rows[:3]:
             clr = action_color(item["Durum"])
             st.markdown(
                 f"<div class='alert-item'><div class='alert-dot' style='background:{clr};'></div><div><div style='font-weight:800;color:#F8FAFC;'>{item['Sembol']} · {item['Durum']}</div><div style='color:#CBD5E1;'>{item['Uyarı']}</div></div></div>",
                 unsafe_allow_html=True,
             )
-    st.markdown(f"**Nakit önerisi:** {format_price(cash)} nakdin var. Kullanılabilir risk alanın {format_price(riskable)}. Yeni fırsat gelmezse SGOV / PPF benzeri park alanı düşünülebilir.")
+    st.markdown(f"**Nakit önerisi:** {format_price(cash)} nakdin var. Bunun {format_price(riskable)} kadarı yeni fırsatlar için risk alanı olarak düşünülebilir. Kalan nakit SGOV / PPF tarafında bekleyebilir.")
     radar = build_radar(profile_name, "1G", 3)
     if radar.empty:
         st.info("Bugün profile uygun yeni Atlas işlemi bulunamadı.")
     else:
         st.markdown("#### Yeni Atlas Fırsatları")
         for i, (_, row) in enumerate(radar.iterrows()):
+            onerilen_tutar = max(10.0, min(riskable, cash * 0.5 if cash > 0 else 0.0))
             st.markdown(
-                f"<div class='radar-card'><div class='radar-title'>{row['Sembol']} · {row['Karar']}</div><div class='radar-meta'>Atlas Skoru: %{row['Atlas Skoru']} · Risk/Getiri: {row['Risk/Getiri']} · Önerilen pozisyon: {format_price(min(riskable, max(10.0, riskable * 0.9)))}</div></div>",
+                f"<div class='radar-card'><div class='radar-title'>{row['Sembol']} · {row['Karar']}</div><div class='radar-meta'>Atlas Skoru: %{row['Atlas Skoru']} · Risk/Getiri: {row['Risk/Getiri']} · Önerilen pozisyon: {format_price(onerilen_tutar)}</div></div>",
                 unsafe_allow_html=True,
             )
             c1, c2 = st.columns([1, 1])
             with c1:
-                if st.button(f"{row['Sembol']} portföye hazırla", key=f"prepare_{row['Sembol']}_{i}", use_container_width=True):
+                if st.button(f"{row['Sembol']} formuna aktar", key=f"prepare_{row['Sembol']}_{i}", use_container_width=True):
                     st.session_state["portfolio_prefill_symbol"] = str(row["Sembol"])
+                    st.session_state["portfolio_prefill_weight"] = "%15"
+                    st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
+                    st.session_state["portfolio_prefill_note"] = f"Atlas fırsatı · Skor %{row['Atlas Skoru']}"
                     st.success(f"{row['Sembol']} yeni işlem formuna aktarıldı.")
             with c2:
                 st.caption(f"Stop: {format_price(row['Stop'])} · Hedef: {format_price(row['Hedef'])}")
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-def suggest_initial_portfolio(profile_name: str) -> List[Dict[str, Any]]:
-    radar = build_radar(profile_name, "1G", 6)
-    stock_rows: List[Dict[str, Any]] = []
-    if not radar.empty:
-        for _, row in radar.head(3).iterrows():
-            stock_rows.append({
-                "Varlık": str(row["Sembol"]),
-                "Tür": "Hisse",
-                "Pay": "%20",
-                "Not": f"Atlas Skoru %{row['Atlas Skoru']} · Risk/Getiri {row['Risk/Getiri']}",
-            })
-    while len(stock_rows) < 3:
-        fallback = DEFAULT_SYMBOLS[len(stock_rows)]
-        stock_rows.append({
-            "Varlık": fallback,
-            "Tür": "Hisse",
-            "Pay": "%20",
-            "Not": "Başlangıç portföyü için güçlü ve likit aday",
-        })
-    return stock_rows + [
-        {"Varlık": "GLD", "Tür": "Altın ETF", "Pay": "%20", "Not": "Portföy dengesi ve güvenli liman"},
-        {"Varlık": "SGOV", "Tür": "PPF / Nakit Park", "Pay": "%20", "Not": "Boşta bekleyen fırsat sermayesi"},
-    ]
-
-
 def render_initial_portfolio_builder(profile_name: str) -> None:
     suggestions = suggest_initial_portfolio(profile_name)
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Atlas Önerilen Başlangıç Portföyü</div><div class="section-sub">Profiline göre seçilen 3 hisse + 1 değerli metal + 1 PPF / nakit park alanı. Dilersen önerilen oranla hızlı ekle, dilersen oranı revize ederek forma aktar.</div>', unsafe_allow_html=True)
-    show_df = pd.DataFrame(suggestions)
+    show_df = pd.DataFrame([{k: v for k, v in item.items() if k in ["Varlık", "Tür", "Pay Yazı", "Not"]} for item in suggestions]).rename(columns={"Pay Yazı": "Pay"})
     st.dataframe(show_df, use_container_width=True, hide_index=True)
-
     for idx, item in enumerate(suggestions):
         c1, c2, c3 = st.columns([1.2, 1.2, 2.6])
         with c1:
             if st.button(f"{item['Varlık']} önerilenle ekle", key=f"onerilen_ekle_{item['Varlık']}_{idx}", use_container_width=True):
-                st.session_state["portfolio_prefill_symbol"] = item["Varlık"]
-                st.session_state["portfolio_prefill_weight"] = item["Pay"]
-                st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
-                st.session_state["portfolio_prefill_note"] = f"Atlas önerisi · {item['Not']}"
-                st.session_state["hizli_ekle_modu"] = True
-                st.success(f"{item['Varlık']} önerilen oranla yeni işlem formuna hazırlandı.")
+                ham = download_symbol(item["Varlık"], "1G")
+                if ham.empty:
+                    st.warning(f"{item['Varlık']} için fiyat alınamadı. 'Oranı revize et' ile manuel ekleyebilirsin.")
+                else:
+                    fiyat = float(ham["Close"].iloc[-1])
+                    ayrilan_tutar = get_initial_cash() * float(item["Pay"])
+                    adet = max(round(ayrilan_tutar / max(fiyat, 1e-9), 4), 0.0001)
+                    add_portfolio_position(
+                        item["Varlık"],
+                        fiyat,
+                        adet,
+                        f"Atlas önerisi · {item['Not']} · Önerilen pay {item['Pay Yazı']}",
+                        "ATLAS TRADE",
+                        float(item["Pay"]),
+                    )
+                    st.success(f"{item['Varlık']} portföye Atlas önerisi olarak eklendi. Artık takip ve yönlendirme başlayacak.")
+                    st.rerun()
         with c2:
             if st.button(f"{item['Varlık']} oranı revize et", key=f"revize_ekle_{item['Varlık']}_{idx}", use_container_width=True):
                 st.session_state["portfolio_prefill_symbol"] = item["Varlık"]
-                st.session_state["portfolio_prefill_weight"] = item["Pay"]
+                st.session_state["portfolio_prefill_weight"] = item["Pay Yazı"]
                 st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
                 st.session_state["portfolio_prefill_note"] = f"Atlas önerisi · {item['Not']}"
-                st.session_state["hizli_ekle_modu"] = False
                 st.info(f"{item['Varlık']} düzenlenebilir şekilde yeni işlem formuna aktarıldı.")
         with c3:
-            st.caption(f"Tür: {item['Tür']} · Önerilen pay: {item['Pay']} · {item['Not']}")
-
+            st.caption(f"Tür: {item['Tür']} · Önerilen pay: {item['Pay Yazı']} · {item['Not']}")
     st.markdown("**Akış:** Önce varlığı seç, önerilen payı kabul et ya da değiştir, sonra Midas'tan aldığın gerçek fiyatı gir. Atlas bundan sonra portföyü izleyip yön vermeye başlar.")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -703,10 +756,10 @@ def render_add_position(default_symbol: str) -> None:
         st.session_state["portfolio_prefill_source"] = "KULLANICI"
     if "portfolio_prefill_note" not in st.session_state:
         st.session_state["portfolio_prefill_note"] = "Midas işlemi"
-    if "hizli_ekle_modu" not in st.session_state:
-        st.session_state["hizli_ekle_modu"] = False
-
     default_idx = SEARCHABLE_ASSETS.index(st.session_state["portfolio_prefill_symbol"]) if st.session_state["portfolio_prefill_symbol"] in SEARCHABLE_ASSETS else 0
+    open_rows, invested_now = build_open_positions()
+    portfolio_value = get_initial_cash() + sum(r["PnL Sayısal"] for r in open_rows)
+
     with st.form("add_position_form", clear_on_submit=False):
         c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
         with c1:
@@ -718,26 +771,36 @@ def render_add_position(default_symbol: str) -> None:
         with c3:
             entry = st.number_input("Alış Fiyatı", min_value=0.0, value=0.0, step=0.01)
         with c4:
-            qty = st.number_input("Adet", min_value=1.0, value=1.0, step=1.0)
-
+            qty = st.number_input("Adet", min_value=0.0001, value=1.0, step=0.1)
         c5, c6 = st.columns([1, 1])
         with c5:
             source_options = ["KULLANICI", "ATLAS TRADE"]
             source_default = st.session_state["portfolio_prefill_source"] if st.session_state["portfolio_prefill_source"] in source_options else "KULLANICI"
             source = st.selectbox("Kaynak", source_options, index=source_options.index(source_default))
         with c6:
-            st.text_input("Mod", value="Önerilenle hızlı ekle" if st.session_state["hizli_ekle_modu"] else "Revize ederek ekle", disabled=True)
-
+            st.text_input("Mod", value="Önerilenle hızlı ekle" if source == "ATLAS TRADE" else "Manuel ekleme", disabled=True)
         note = st.text_input("Not", value=st.session_state.get("portfolio_prefill_note", "Midas işlemi"))
-        st.caption("Burada payı seçiyorsun. Sonrasında Midas'ta aldığın gerçek fiyatı girip işlemi Atlas'a tanıtıyorsun.")
+
+        selected_weight_value = float(selected_weight.replace("%", "").replace(",", ".")) / 100.0
+        position_value_preview = entry * qty
+        portfolio_after = portfolio_value + max(position_value_preview - 0.0, 0.0)
+        pct_after = (position_value_preview / max(portfolio_after, 1e-9)) * 100 if position_value_preview > 0 else 0.0
+
+        st.markdown(
+            f"**Ön İzleme:** Pozisyon değeri {format_price(position_value_preview)} · İşlem sonrası toplam portföy yaklaşık {format_price(portfolio_after)} · Bu işlemin payı yaklaşık %{round(float(pct_after), 2)} · Hedeflenen pay {selected_weight}"
+        )
+        if pct_after > 40:
+            st.warning("Bu işlem portföyde çok büyük ağırlık oluşturuyor. Oranı veya adedi düşürmek daha sağlıklı olabilir.")
         submitted = st.form_submit_button("Portföye Ekle", use_container_width=True)
         if submitted:
             if symbol and entry > 0 and qty > 0:
-                add_portfolio_position(symbol, entry, qty, f"{note} · Önerilen pay {selected_weight}", source)
+                add_portfolio_position(symbol, entry, qty, f"{note} · Önerilen pay {selected_weight}", source, selected_weight_value)
                 st.session_state["portfolio_prefill_symbol"] = symbol
                 st.session_state["portfolio_prefill_weight"] = selected_weight
                 st.session_state["portfolio_prefill_source"] = source
                 st.session_state["portfolio_prefill_note"] = note
+                if portfolio_after > get_initial_cash():
+                    set_initial_cash(portfolio_after)
                 st.success(f"{symbol} portföye eklendi. Atlas artık bu işlemi izleyecek.")
                 st.rerun()
             else:
@@ -765,25 +828,20 @@ def main_streamlit() -> None:
     inject_css()
     init_db()
     render_topbar()
-
     profile_name, ready = onboarding_sidebar()
     if not ready:
         st.markdown('<div class="card"><div class="section-title">Atlas ile Başlangıç</div><div class="section-sub">3 kısa sorudan sonra sana uygun profil belirlenir. Ardından Atlas sana Türkçe ve sade bir başlangıç portföyü önerir.</div></div>', unsafe_allow_html=True)
         return
-
     tabs = st.tabs(["👜 Portföy", "➕ Yeni İşlem", "🗃️ Geçmiş"])
-    open_rows = build_open_positions()
-
+    open_rows, invested_now = build_open_positions()
     with tabs[0]:
         if not open_rows:
             render_initial_portfolio_builder(profile_name)
-        cash, riskable = render_portfolio_overview(open_rows)
-        render_open_positions(open_rows)
+        portfolio_value, cash, riskable = render_portfolio_overview(open_rows, invested_now)
+        render_open_positions(open_rows, portfolio_value)
         render_action_center(open_rows, cash, riskable, profile_name)
-
     with tabs[1]:
         render_add_position(DEFAULT_SYMBOLS[0])
-
     with tabs[2]:
         render_history_tab()
 
@@ -832,6 +890,10 @@ class TestAtlasMoney(unittest.TestCase):
 
     def test_profile_presets(self):
         self.assertIn("Dengeli", PROFILE_PRESETS)
+
+    def test_suggest_initial_portfolio_count(self):
+        suggestions = suggest_initial_portfolio("Dengeli")
+        self.assertEqual(len(suggestions), 5)
 
 
 def run_tests() -> int:
