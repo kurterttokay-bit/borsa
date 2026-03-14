@@ -52,6 +52,7 @@ SAFE_ASSETS = ["GLD", "IAU", "TLT", "IEF", "SGOV", "BIL", "SLV"]
 RISKY_UNIVERSE = US_MEGA_CAPS + US_GROWTH + US_ETFS
 SEARCHABLE_ASSETS = sorted(list(set(RISKY_UNIVERSE + SAFE_ASSETS)))
 DEFAULT_SYMBOLS = US_MEGA_CAPS.copy()
+RADAR_UNIVERSE = US_MEGA_CAPS[:12] + US_GROWTH[:8] + US_ETFS
 
 PROFILE_PRESETS: Dict[str, Dict[str, Any]] = {
     "Koruma Odaklı": {"threshold": 70, "risk_label": "Düşük", "max_positions": 5},
@@ -383,6 +384,7 @@ def build_risk_levels(df: pd.DataFrame, verdict: str) -> Tuple[Optional[float], 
     return round(sl, 4), round(tp, 4), round(rr, 2)
 
 
+@cache_data(ttl=180, show_spinner=False)
 def analyze_symbol(symbol: str, timeframe: str = "1G") -> Tuple[pd.DataFrame, Optional[AnalysisResult], Optional[str]]:
     try:
         raw = download_symbol(symbol, timeframe)
@@ -447,6 +449,37 @@ def analyze_symbol(symbol: str, timeframe: str = "1G") -> Tuple[pd.DataFrame, Op
         return pd.DataFrame(), None, "Analiz sırasında hata oluştu"
 
 
+@cache_data(ttl=180, show_spinner=False)
+def build_radar(profile_name: str, timeframe: str = "1G", limit: int = 3) -> pd.DataFrame:
+    threshold = PROFILE_PRESETS[profile_name]["threshold"]
+    rows = []
+    for symbol in RADAR_UNIVERSE:
+        try:
+            _, result, err = analyze_symbol(symbol, timeframe)
+            if err or result is None:
+                continue
+            if result.market_strength < threshold:
+                continue
+            if result.verdict not in ["GÜÇLÜ AL", "AL"]:
+                continue
+            rows.append(
+                {
+                    "Sembol": symbol,
+                    "Atlas Skoru": result.market_strength,
+                    "Karar": result.verdict,
+                    "Fiyat": result.close,
+                    "Risk/Getiri": result.rr_ratio,
+                    "Stop": result.stop_loss,
+                    "Hedef": result.take_profit,
+                }
+            )
+        except Exception:
+            continue
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values(["Atlas Skoru", "Risk/Getiri"], ascending=[False, False]).head(limit).reset_index(drop=True)
+
+
 def build_radar(profile_name: str, timeframe: str = "1G", limit: int = 3) -> pd.DataFrame:
     threshold = PROFILE_PRESETS[profile_name]["threshold"]
     rows = []
@@ -477,6 +510,7 @@ def build_radar(profile_name: str, timeframe: str = "1G", limit: int = 3) -> pd.
     return pd.DataFrame(rows).sort_values(["Atlas Skoru", "Risk/Getiri"], ascending=[False, False]).head(limit).reset_index(drop=True)
 
 
+@st.cache_data(show_spinner=False)
 def suggest_initial_portfolio(profile_name: str) -> List[Dict[str, Any]]:
     radar = build_radar(profile_name, "1G", 6)
     stock_rows: List[Dict[str, Any]] = []
@@ -513,27 +547,30 @@ def inject_css() -> None:
         """
         <style>
         html, body, [class*="css"] { font-family: Inter, system-ui, sans-serif; }
-        .stApp { background: linear-gradient(180deg, #0B1220 0%, #111827 100%); color:#E5E7EB; }
-        .block-container { max-width: 1320px; padding-top: 1rem; padding-bottom: 2rem; }
-        section[data-testid="stSidebar"] { background: #0B1220; border-right: 1px solid rgba(148,163,184,0.12); }
-        .topbar { display:flex; justify-content:space-between; align-items:center; padding:16px 18px; border-radius:20px; background:#111827; border:1px solid rgba(148,163,184,0.10); margin-bottom:16px; }
-        .brand-title { font-size:1.45rem; font-weight:800; color:#F8FAFC; }
-        .brand-sub { color:#94A3B8; font-size:0.92rem; margin-top:4px; }
+        .stApp { background: radial-gradient(circle at top, #172554 0%, #0B1220 32%, #0F172A 100%); color:#E5E7EB; }
+        .block-container { max-width: 1380px; padding-top: 0.9rem; padding-bottom: 2rem; }
+        section[data-testid="stSidebar"] { background: rgba(8, 15, 32, 0.96); border-right: 1px solid rgba(148,163,184,0.10); }
+        .topbar { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:18px 20px; border-radius:24px; background:linear-gradient(135deg, rgba(15,23,42,0.96), rgba(17,24,39,0.92)); border:1px solid rgba(148,163,184,0.12); box-shadow:0 18px 50px rgba(2,6,23,0.32); margin-bottom:18px; }
+        .brand-title { font-size:1.6rem; font-weight:900; color:#F8FAFC; letter-spacing:0.01em; }
+        .brand-sub { color:#93C5FD; font-size:0.9rem; margin-top:6px; }
         .nav-pills { display:flex; gap:10px; flex-wrap:wrap; }
-        .nav-pill { padding:10px 14px; border-radius:999px; background:#1F2937; color:#CBD5E1; font-size:0.8rem; font-weight:700; }
-        .card { background:#111827; border:1px solid rgba(148,163,184,0.10); border-radius:20px; padding:18px; margin-bottom:16px; }
-        .section-title { color:#F8FAFC; font-size:1.02rem; font-weight:800; margin-bottom:8px; }
-        .section-sub { color:#94A3B8; font-size:0.9rem; margin-bottom:12px; }
+        .nav-pill { padding:10px 14px; border-radius:999px; background:rgba(30,41,59,0.88); color:#DBEAFE; font-size:0.78rem; font-weight:800; border:1px solid rgba(96,165,250,0.16); }
+        .card { background:linear-gradient(180deg, rgba(15,23,42,0.96), rgba(17,24,39,0.92)); border:1px solid rgba(148,163,184,0.10); border-radius:24px; padding:20px; margin-bottom:16px; box-shadow:0 18px 50px rgba(2,6,23,0.22); }
+        .section-title { color:#F8FAFC; font-size:1.04rem; font-weight:900; margin-bottom:8px; }
+        .section-sub { color:#94A3B8; font-size:0.92rem; margin-bottom:14px; }
         .metric-grid { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:12px; }
-        .metric-card { background:#0F172A; border:1px solid rgba(148,163,184,0.10); border-radius:16px; padding:14px; }
-        .metric-label { color:#94A3B8; font-size:0.76rem; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:5px; }
-        .metric-value { color:#F8FAFC; font-size:1.15rem; font-weight:800; }
-        .risk-chip { display:inline-block; padding:6px 10px; border-radius:999px; font-size:0.78rem; font-weight:700; }
-        .alert-item { display:flex; gap:10px; padding:12px 14px; border-radius:16px; background:#0F172A; border:1px solid rgba(148,163,184,0.08); margin-bottom:10px; }
+        .metric-card { background:linear-gradient(180deg, rgba(14,21,37,0.98), rgba(15,23,42,0.92)); border:1px solid rgba(148,163,184,0.10); border-radius:18px; padding:15px; }
+        .metric-label { color:#94A3B8; font-size:0.74rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+        .metric-value { color:#F8FAFC; font-size:1.18rem; font-weight:900; }
+        .risk-chip { display:inline-block; padding:6px 10px; border-radius:999px; font-size:0.78rem; font-weight:800; background:rgba(15,23,42,0.7); }
+        .alert-item { display:flex; gap:10px; padding:13px 14px; border-radius:16px; background:rgba(15,23,42,0.86); border:1px solid rgba(148,163,184,0.08); margin-bottom:10px; }
         .alert-dot { width:10px; height:10px; border-radius:999px; margin-top:6px; }
-        .radar-card { background:#0F172A; border:1px solid rgba(148,163,184,0.08); border-radius:18px; padding:16px; margin-bottom:10px; }
-        .radar-title { color:#F8FAFC; font-size:1rem; font-weight:800; }
-        .radar-meta { color:#94A3B8; font-size:0.85rem; margin-top:4px; }
+        .radar-card { background:linear-gradient(180deg, rgba(15,23,42,0.94), rgba(17,24,39,0.90)); border:1px solid rgba(96,165,250,0.10); border-radius:18px; padding:16px; margin-bottom:10px; }
+        .radar-title { color:#F8FAFC; font-size:1rem; font-weight:900; }
+        .radar-meta { color:#94A3B8; font-size:0.86rem; margin-top:4px; }
+        .hero-strip { margin-top:10px; padding:12px 14px; border-radius:18px; background:linear-gradient(90deg, rgba(30,41,59,0.92), rgba(15,23,42,0.75)); border:1px solid rgba(96,165,250,0.14); color:#DBEAFE; font-size:0.88rem; }
+        @media (max-width: 1100px) { .metric-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+        @media (max-width: 700px) { .metric-grid { grid-template-columns: repeat(1,minmax(0,1fr)); } .topbar { flex-direction:column; align-items:flex-start; } }
         </style>
         """,
         unsafe_allow_html=True,
@@ -547,11 +584,12 @@ def render_topbar() -> None:
             <div>
                 <div class="brand-title">{APP_TITLE}</div>
                 <div class="brand-sub">{APP_SUBTITLE}</div>
+                <div class="hero-strip">Premium görünüm, daha düşük yük ve daha temiz aksiyon akışı için sadeleştirilmiş v1 ekran.</div>
             </div>
             <div class="nav-pills">
-                <div class="nav-pill">Portföy</div>
-                <div class="nav-pill">Aksiyon</div>
-                <div class="nav-pill">Geçmiş</div>
+                <div class="nav-pill">Portföy Özeti</div>
+                <div class="nav-pill">Aksiyon Merkezi</div>
+                <div class="nav-pill">İşlem Geçmişi</div>
             </div>
         </div>
         """,
@@ -604,26 +642,21 @@ def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
     invested_now = 0.0
     for _, row in open_df.iterrows():
         symbol = str(row["symbol"])
-        raw = download_symbol(symbol, "1G")
-        current_price = None
+        _, analysis, _ = analyze_symbol(symbol, "1G")
+        current_price = analysis.close if analysis else None
         pnl = 0.0
         pnl_pct = 0.0
-        stop = None
-        target = None
+        stop = analysis.stop_loss if analysis else None
+        target = analysis.take_profit if analysis else None
         action = "TUT"
         alert = "Pozisyon izleniyor"
         value = 0.0
-        if not raw.empty:
-            df_ind = add_indicators(raw)
-            current_price = float(df_ind["Close"].iloc[-1])
+        if current_price is not None:
             value = current_price * float(row["quantity"])
             invested_now += value
             pnl = (current_price - float(row["entry_price"])) * float(row["quantity"])
             pnl_pct = ((current_price / float(row["entry_price"])) - 1) * 100 if float(row["entry_price"]) else 0.0
-            last_atr = safe_float(df_ind["ATR14"].iloc[-1]) or 0.0
-            stop = float(row["entry_price"]) - (1.5 * last_atr)
-            target = float(row["entry_price"]) + (3.0 * last_atr)
-            if current_price <= (stop or -999999):
+            if stop is not None and current_price <= stop:
                 action = "ÇIK"
                 alert = "Koruyucu stop altı, çıkış değerlendir"
             elif pnl_pct >= 4:
@@ -746,6 +779,7 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
                 unsafe_allow_html=True,
             )
     st.markdown(f"**Nakit önerisi:** {format_price(cash)} nakdin var. Bunun {format_price(riskable)} kadarı yeni fırsatlar için risk alanı olarak düşünülebilir. Kalan nakit SGOV / PPF tarafında bekleyebilir.")
+    st.caption("Radar daha akıcı çalışsın diye önbellekli ve daraltılmış kaliteli izleme evreni kullanılıyor.")
 
     radar = build_radar(profile_name, "1G", 10)
     open_map = {row["Sembol"]: row for row in rows}
@@ -811,131 +845,181 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
 
 
 def render_initial_portfolio_builder(profile_name: str) -> None:
-    suggestions = suggest_initial_portfolio(profile_name)
+    suggestion_key = f"atlas_suggestions_{profile_name}"
+
+    if suggestion_key not in st.session_state:
+        st.session_state[suggestion_key] = suggest_initial_portfolio(profile_name)
+
+    base_suggestions = st.session_state[suggestion_key]
+
+    if "atlas_hazir_portfoy" not in st.session_state:
+        st.session_state["atlas_hazir_portfoy"] = []
+
     if "atlas_secili_portfoy" not in st.session_state:
         st.session_state["atlas_secili_portfoy"] = {}
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Atlas Önerilen Başlangıç Portföyü</div><div class="section-sub">Önce hangi varlıkları istediğini seç. Sonra Atlas bunları önerilen oranlarla hazırlasın. Midas\'ta alımı yaptıktan sonra tik atıp portföye ekle.</div>', unsafe_allow_html=True)
+    hazir_portfoy = st.session_state["atlas_hazir_portfoy"]
 
-    show_df = pd.DataFrame([{k: v for k, v in item.items() if k in ["Varlık", "Tür", "Pay Yazı", "Not"]} for item in suggestions]).rename(columns={"Pay Yazı": "Pay"})
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="section-title">Atlas Önerilen Başlangıç Portföyü</div>
+        <div class="section-sub">
+            Önce hangi varlıkları istediğini seç. Sonra Atlas bunları önerilen oranlarla hazırlasın.
+            Midas'ta alımı yaptıktan sonra tik atıp portföye ekle.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    show_df = pd.DataFrame([
+        {k: v for k, v in item.items() if k in ["Varlık", "Tür", "Pay Yazı", "Not"]}
+        for item in base_suggestions
+    ]).rename(columns={"Pay Yazı": "Pay"})
     st.dataframe(show_df, use_container_width=True, hide_index=True)
 
-    st.markdown("#### 1) Portföy adaylarını seç")
-    for idx, item in enumerate(suggestions):
-        sembol = item["Varlık"]
-        varsayilan = st.session_state["atlas_secili_portfoy"].get(sembol, False)
-        secildi = st.checkbox(
-            f"{sembol} · {item['Tür']} · {item['Pay Yazı']}",
-            value=varsayilan,
-            key=f"atlas_select_{sembol}_{idx}",
-        )
-        st.session_state["atlas_secili_portfoy"][sembol] = secildi
-        st.caption(item["Not"])
+    hazir_semboller = {item["Varlık"] for item in hazir_portfoy}
+    selectable_suggestions = [
+        item for item in base_suggestions if item["Varlık"] not in hazir_semboller
+    ]
 
-    secilenler = [item for item in suggestions if st.session_state["atlas_secili_portfoy"].get(item["Varlık"], False)]
+    if selectable_suggestions:
+        st.markdown("#### 1) Portföy adaylarını seç")
 
-    if secilenler:
-        st.markdown("#### 2) Seçilen işlemleri hazırla")
-        if st.button("Seçilen işlemleri hazırla", use_container_width=True, key="atlas_hazirla_btn"):
-            hazir_listesi = []
-            for item in secilenler:
-                hazir_listesi.append(
-                    {
-                        "Varlık": item["Varlık"],
-                        "Tür": item["Tür"],
-                        "Pay": item["Pay"],
-                        "Pay Yazı": item["Pay Yazı"],
-                        "Not": item["Not"],
-                        "Midas Alındı": False,
-                        "Alış Fiyatı": 0.0,
-                        "Adet": 0.0,
-                    }
-                )
-            st.session_state["atlas_hazir_portfoy"] = hazir_listesi
-            st.success("Seçilen varlıklar hazırlandı. Şimdi Midas'ta alım yapıp aşağıdan işlemleri portföye ekleyebilirsin.")
-            st.rerun()
+        for idx, item in enumerate(selectable_suggestions):
+            sembol = item["Varlık"]
+            varsayilan = st.session_state["atlas_secili_portfoy"].get(sembol, False)
+            secildi = st.checkbox(
+                f"{sembol} · {item['Tür']} · {item['Pay Yazı']}",
+                value=varsayilan,
+                key=f"atlas_select_{sembol}_{idx}",
+            )
+            st.session_state["atlas_secili_portfoy"][sembol] = secildi
+            st.caption(item["Not"])
 
-    hazir_portfoy = st.session_state.get("atlas_hazir_portfoy", [])
+        secilenler = [
+            item
+            for item in selectable_suggestions
+            if st.session_state["atlas_secili_portfoy"].get(item["Varlık"], False)
+        ]
+
+        if secilenler:
+            st.markdown("#### 2) Seçilen işlemleri hazırla")
+            if st.button("Seçilen işlemleri hazırla", use_container_width=True, key="atlas_hazirla_btn"):
+                mevcutlar = {x["Varlık"] for x in st.session_state["atlas_hazir_portfoy"]}
+
+                for item in secilenler:
+                    if item["Varlık"] in mevcutlar:
+                        continue
+
+                    st.session_state["atlas_hazir_portfoy"].append(
+                        {
+                            "Varlık": item["Varlık"],
+                            "Tür": item["Tür"],
+                            "Pay": item["Pay"],
+                            "Pay Yazı": item["Pay Yazı"],
+                            "Not": item["Not"],
+                            "Midas Alındı": False,
+                            "Alış Fiyatı": 0.0,
+                            "Adet": 0.0,
+                        }
+                    )
+
+                st.success("Seçilen varlıklar hazırlandı. Şimdi Midas'ta alım yapıp aşağıdan işlemleri portföye ekleyebilirsin.")
+                st.rerun()
+
     if hazir_portfoy:
         st.markdown("#### 3) Midas alımını onayla ve portföye ekle")
         baslangic_bakiye = get_initial_cash()
+        silinecekler: List[str] = []
+
         for idx, item in enumerate(hazir_portfoy):
             sembol = item["Varlık"]
             st.markdown(f"**{sembol}** · {item['Tür']} · Önerilen pay {item['Pay Yazı']}")
-            c1, c2, c3, c4 = st.columns([1.1, 1, 1, 1.2])
-            with c1:
-                midas_alindi = st.checkbox("Midas'ta aldım", value=item.get("Midas Alındı", False), key=f"midas_alindi_{sembol}_{idx}")
-            with c2:
-                alis_fiyati = st.number_input("Alış fiyatı", min_value=0.0, value=float(item.get("Alış Fiyatı", 0.0)), step=0.01, key=f"alis_fiyati_{sembol}_{idx}")
-            with c3:
+
+            key_alindi = f"midas_alindi_{sembol}_{idx}"
+            key_alis = f"alis_fiyati_{sembol}_{idx}"
+            key_adet = f"adet_{sembol}_{idx}"
+
+            if key_alindi not in st.session_state:
+                st.session_state[key_alindi] = bool(item.get("Midas Alındı", False))
+
+            if key_alis not in st.session_state:
+                st.session_state[key_alis] = float(item.get("Alış Fiyatı", 0.0))
+
+            if key_adet not in st.session_state:
+                mevcut_alis = st.session_state[key_alis]
                 varsayilan_tutar = baslangic_bakiye * float(item["Pay"])
-                varsayilan_adet = 0.0 if alis_fiyati <= 0 else round(varsayilan_tutar / max(alis_fiyati, 1e-9), 4)
-                adet = st.number_input("Adet", min_value=0.0, value=float(item.get("Adet", varsayilan_adet)), step=0.0001, key=f"adet_{sembol}_{idx}")
+                varsayilan_adet = 0.0 if mevcut_alis <= 0 else round(varsayilan_tutar / max(mevcut_alis, 1e-9), 4)
+                st.session_state[key_adet] = float(item.get("Adet", 0.0)) if float(item.get("Adet", 0.0)) > 0 else float(varsayilan_adet)
+
+            c1, c2, c3, c4 = st.columns([1.1, 1, 1, 1.2])
+
+            with c1:
+                midas_alindi = st.checkbox("Midas'ta aldım", key=key_alindi)
+
+            with c2:
+                alis_fiyati = st.number_input("Alış fiyatı", min_value=0.0, step=0.01, key=key_alis)
+
+            with c3:
+                adet = st.number_input("Adet", min_value=0.0, step=0.0001, key=key_adet)
+
             with c4:
                 pozisyon_degeri = alis_fiyati * adet
                 st.markdown(f"Pozisyon değeri: **{format_price(pozisyon_degeri)}**")
 
-            item["Midas Alındı"] = midas_alindi
-            item["Alış Fiyatı"] = alis_fiyati
-            item["Adet"] = adet
+            st.session_state["atlas_hazir_portfoy"][idx]["Midas Alındı"] = midas_alindi
+            st.session_state["atlas_hazir_portfoy"][idx]["Alış Fiyatı"] = alis_fiyati
+            st.session_state["atlas_hazir_portfoy"][idx]["Adet"] = adet
 
             c5, c6 = st.columns([1, 1])
+
             with c5:
                 if st.button(f"{sembol} portföye ekle", key=f"tekli_portfoy_ekle_{sembol}_{idx}", use_container_width=True):
-                    if not midas_alindi:
+                    current_item = st.session_state["atlas_hazir_portfoy"][idx]
+
+                    if not current_item["Midas Alındı"]:
                         st.warning(f"Önce {sembol} için Midas alımını onayla.")
-                    elif alis_fiyati <= 0 or adet <= 0:
+                    elif current_item["Alış Fiyatı"] <= 0 or current_item["Adet"] <= 0:
                         st.warning(f"{sembol} için alış fiyatı ve adet girmen gerekiyor.")
                     else:
                         add_portfolio_position(
-                            sembol,
-                            alis_fiyati,
-                            adet,
-                            f"Atlas önerisi · {item['Not']} · Önerilen pay {item['Pay Yazı']}",
+                            current_item["Varlık"],
+                            current_item["Alış Fiyatı"],
+                            current_item["Adet"],
+                            f"Atlas önerisi · {current_item['Not']} · Önerilen pay {current_item['Pay Yazı']}",
                             "ATLAS TRADE",
-                            float(item["Pay"]),
-                            item["Tür"],
+                            float(current_item["Pay"]),
+                            current_item["Tür"],
                             "",
                         )
+                        silinecekler.append(sembol)
                         st.success(f"{sembol} portföye eklendi. Atlas artık bu işlemi izleyecek.")
-                        st.session_state["atlas_hazir_portfoy"] = [x for x in hazir_portfoy if x["Varlık"] != sembol]
-                        st.rerun()
+
             with c6:
-                if st.button(f"{sembol} oranı revize et", key=f"tekli_revize_{sembol}_{idx}", use_container_width=True):
-                    st.session_state["portfolio_prefill_symbol"] = sembol
-                    st.session_state["portfolio_prefill_weight"] = item["Pay Yazı"]
-                    st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
-                    st.session_state["portfolio_prefill_note"] = f"Atlas önerisi · {item['Not']}"
-                    st.info(f"{sembol} düzenlenebilir şekilde yeni işlem formuna aktarıldı.")
+                if st.button(f"{sembol} kaldır", key=f"hazirdan_sil_{sembol}_{idx}", use_container_width=True):
+                    silinecekler.append(sembol)
 
-        if hazir_portfoy:
-            st.markdown("#### 4) Toplu işlem")
-            if st.button("Midas'ta aldığım seçili işlemleri toplu ekle", use_container_width=True, key="toplu_midas_ekle"):
-                eklendi = 0
-                kalanlar = []
-                for item in hazir_portfoy:
-                    if item.get("Midas Alındı") and float(item.get("Alış Fiyatı", 0)) > 0 and float(item.get("Adet", 0)) > 0:
-                        add_portfolio_position(
-                            item["Varlık"],
-                            float(item["Alış Fiyatı"]),
-                            float(item["Adet"]),
-                            f"Atlas önerisi · {item['Not']} · Önerilen pay {item['Pay Yazı']}",
-                            "ATLAS TRADE",
-                            float(item["Pay"]),
-                        )
-                        eklendi += 1
-                    else:
-                        kalanlar.append(item)
-                st.session_state["atlas_hazir_portfoy"] = kalanlar
-                if eklendi > 0:
-                    st.success(f"{eklendi} işlem portföye eklendi. Atlas artık takip ve yönlendirme yapacak.")
-                    st.rerun()
-                else:
-                    st.warning("Toplu ekleme için önce Midas alımını işaretleyip fiyat ve adet girmen gerekiyor.")
+            st.markdown("---")
 
-    st.markdown("**Akış:** Önce seç, sonra Midas'ta al, ardından tik atıp fiyat ve adedi girerek portföye ekle. Atlas bundan sonra portföyü izleyip yön vermeye başlar.")
-    st.markdown('</div>', unsafe_allow_html=True)
+        if silinecekler:
+            sil_set = set(silinecekler)
+            st.session_state["atlas_hazir_portfoy"] = [
+                x for x in st.session_state["atlas_hazir_portfoy"] if x["Varlık"] not in sil_set
+            ]
+
+            for sembol in sil_set:
+                for key_prefix in ["midas_alindi", "alis_fiyati", "adet"]:
+                    anahtarlar = [k for k in list(st.session_state.keys()) if k.startswith(f"{key_prefix}_{sembol}_")]
+                    for k in anahtarlar:
+                        del st.session_state[k]
+
+                if sembol in st.session_state["atlas_secili_portfoy"]:
+                    st.session_state["atlas_secili_portfoy"][sembol] = False
+
+            st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_add_position(default_symbol: str) -> None:
@@ -1053,53 +1137,6 @@ def render_performance_cards(open_rows: List[Dict[str, Any]], portfolio_value: f
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-def render_performance_cards(open_rows: List[Dict[str, Any]], portfolio_value: float) -> None:
-    history_df = load_history(200)
-    closed_count = len(history_df)
-    win_rate = 0.0
-    avg_pnl_pct = 0.0
-    realized_pnl = 0.0
-    confidence_score = 50.0
-    atlas_vs_nasdaq = 0.0
-
-    if not history_df.empty:
-        win_rate = float((history_df["pnl"] > 0).mean() * 100)
-        avg_pnl_pct = float(history_df["pnl_pct"].mean())
-        realized_pnl = float(history_df["pnl"].sum())
-
-    unrealized_pnl = float(sum(row["PnL Sayısal"] for row in open_rows)) if open_rows else 0.0
-    total_pnl = realized_pnl + unrealized_pnl
-    atlas_return_pct = ((portfolio_value / max(get_initial_cash(), 1e-9)) - 1) * 100
-    nasdaq_proxy_pct = 1.8
-    atlas_vs_nasdaq = atlas_return_pct - nasdaq_proxy_pct
-
-    if closed_count == 0:
-        confidence_score = 55.0 if len(open_rows) > 0 else 50.0
-    else:
-        confidence_score = max(0.0, min(100.0, (win_rate * 0.55) + (max(avg_pnl_pct, 0) * 6) + min(closed_count, 20)))
-
-    best_asset = "-"
-    best_asset_pnl = None
-    if open_rows:
-        sorted_rows = sorted(open_rows, key=lambda x: x["PnL Sayısal"], reverse=True)
-        best_asset = sorted_rows[0]["Sembol"]
-        best_asset_pnl = sorted_rows[0]["PnL Sayısal"]
-
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Atlas Performans Özeti</div><div class="section-sub">İsteyen için daha derin performans görünümü. Atlas vs piyasa ve sistem güven sinyalleri burada görünür.</div>', unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Toplam Getiri", f"%{round(float(atlas_return_pct), 2)}", f"{format_price(total_pnl)}")
-    c2.metric("Atlas vs Nasdaq", f"%{round(float(atlas_vs_nasdaq), 2)}", f"Nasdaq %{nasdaq_proxy_pct}")
-    c3.metric("Başarılı İşlem Oranı", f"%{round(float(win_rate), 1)}", f"{closed_count} kapanan işlem")
-    c4.metric("Atlas Güven Skoru", f"{round(float(confidence_score), 0)}/100", f"Ort. %{round(float(avg_pnl_pct), 2)}")
-    d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Gerçekleşen Kar/Zarar", format_price(realized_pnl), "Kapanan işlemler")
-    d2.metric("Açık Pozisyon Kar/Zarar", format_price(unrealized_pnl), f"{len(open_rows)} açık işlem")
-    d3.metric("En İyi Açık Pozisyon", best_asset, format_price(best_asset_pnl) if best_asset_pnl is not None else "-")
-    d4.metric("Portföy Verimliliği", f"%{round(float((win_rate + max(atlas_return_pct, 0)) / 2), 1)}", "Atlas iç metriği")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
 def render_cashflow_calendar(open_rows: List[Dict[str, Any]]) -> None:
     eurobonds = [r for r in open_rows if r.get("Varlık Türü") == "Eurobond" and str(r.get("Kupon Tarihi", "")).strip()]
     if not eurobonds:
@@ -1137,6 +1174,11 @@ def main_streamlit() -> None:
     if not ready:
         st.markdown('<div class="card"><div class="section-title">Atlas ile Başlangıç</div><div class="section-sub">3 kısa sorudan sonra sana uygun profil belirlenir. Ardından Atlas sana Türkçe ve sade bir başlangıç portföyü önerir.</div></div>', unsafe_allow_html=True)
         return
+    col_a, col_b = st.columns([6, 1])
+    with col_b:
+        if st.button("Yenile", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
     tabs = st.tabs(["👜 Portföy", "➕ Yeni İşlem", "🗃️ Geçmiş"])
     open_rows, invested_now = build_open_positions()
     with tabs[0]:
@@ -1194,6 +1236,7 @@ class TestAtlasMoney(unittest.TestCase):
     def test_searchable_assets_contains_safe_assets(self):
         self.assertIn("GLD", SEARCHABLE_ASSETS)
         self.assertIn("SGOV", SEARCHABLE_ASSETS)
+        self.assertGreater(len(RADAR_UNIVERSE), 0)
 
     def test_profile_presets(self):
         self.assertIn("Dengeli", PROFILE_PRESETS)
