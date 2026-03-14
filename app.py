@@ -663,42 +663,82 @@ def suggest_initial_portfolio(profile_name: str) -> List[Dict[str, Any]]:
 def render_initial_portfolio_builder(profile_name: str) -> None:
     suggestions = suggest_initial_portfolio(profile_name)
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Atlas Önerilen Başlangıç Portföyü</div><div class="section-sub">Profiline göre seçilen 3 hisse + 1 değerli metal + 1 PPF / nakit park alanı. Önce bunu gör, sonra istersen kendi işlemlerini manuel ekle.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Önerilen Başlangıç Portföyü</div><div class="section-sub">Profiline göre seçilen 3 hisse + 1 değerli metal + 1 PPF / nakit park alanı. Dilersen önerilen oranla hızlı ekle, dilersen oranı revize ederek forma aktar.</div>', unsafe_allow_html=True)
     show_df = pd.DataFrame(suggestions)
     st.dataframe(show_df, use_container_width=True, hide_index=True)
-    cols = st.columns(len(suggestions))
+
     for idx, item in enumerate(suggestions):
-        with cols[idx]:
-            if st.button(f"{item['Varlık']} formuna aktar", key=f"oneri_{item['Varlık']}_{idx}", use_container_width=True):
+        c1, c2, c3 = st.columns([1.2, 1.2, 2.6])
+        with c1:
+            if st.button(f"{item['Varlık']} önerilenle ekle", key=f"onerilen_ekle_{item['Varlık']}_{idx}", use_container_width=True):
                 st.session_state["portfolio_prefill_symbol"] = item["Varlık"]
-                st.success(f"{item['Varlık']} yeni işlem formuna aktarıldı.")
-    st.markdown("**Not:** Başlangıç portföyü bir zorunluluk değil. Dilersen sadece bazılarını kullanabilir, dilersen tamamen kendi portföyünü kurabilirsin.")
+                st.session_state["portfolio_prefill_weight"] = item["Pay"]
+                st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
+                st.session_state["portfolio_prefill_note"] = f"Atlas önerisi · {item['Not']}"
+                st.session_state["hizli_ekle_modu"] = True
+                st.success(f"{item['Varlık']} önerilen oranla yeni işlem formuna hazırlandı.")
+        with c2:
+            if st.button(f"{item['Varlık']} oranı revize et", key=f"revize_ekle_{item['Varlık']}_{idx}", use_container_width=True):
+                st.session_state["portfolio_prefill_symbol"] = item["Varlık"]
+                st.session_state["portfolio_prefill_weight"] = item["Pay"]
+                st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
+                st.session_state["portfolio_prefill_note"] = f"Atlas önerisi · {item['Not']}"
+                st.session_state["hizli_ekle_modu"] = False
+                st.info(f"{item['Varlık']} düzenlenebilir şekilde yeni işlem formuna aktarıldı.")
+        with c3:
+            st.caption(f"Tür: {item['Tür']} · Önerilen pay: {item['Pay']} · {item['Not']}")
+
+    st.markdown("**Akış:** Önce varlığı seç, önerilen payı kabul et ya da değiştir, sonra Midas'tan aldığın gerçek fiyatı gir. Atlas bundan sonra portföyü izleyip yön vermeye başlar.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_add_position(default_symbol: str) -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Yeni İşlem Ekle</div><div class="section-sub">Midas\'ta aldığın varlığı manuel ekle. Atlas bundan sonra takip etsin.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Yeni İşlem Ekle</div><div class="section-sub">Midas\'ta aldığın varlığı manuel ekle. Atlas bundan sonra takip etsin. İstersen Atlas\'ın önerdiği oranı hızlıca kullanabilirsin.</div>', unsafe_allow_html=True)
     if "portfolio_prefill_symbol" not in st.session_state:
         st.session_state["portfolio_prefill_symbol"] = default_symbol
+    if "portfolio_prefill_weight" not in st.session_state:
+        st.session_state["portfolio_prefill_weight"] = "%20"
+    if "portfolio_prefill_source" not in st.session_state:
+        st.session_state["portfolio_prefill_source"] = "KULLANICI"
+    if "portfolio_prefill_note" not in st.session_state:
+        st.session_state["portfolio_prefill_note"] = "Midas işlemi"
+    if "hizli_ekle_modu" not in st.session_state:
+        st.session_state["hizli_ekle_modu"] = False
+
     default_idx = SEARCHABLE_ASSETS.index(st.session_state["portfolio_prefill_symbol"]) if st.session_state["portfolio_prefill_symbol"] in SEARCHABLE_ASSETS else 0
     with st.form("add_position_form", clear_on_submit=False):
         c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
         with c1:
             symbol = st.selectbox("Varlık Ara", SEARCHABLE_ASSETS, index=default_idx)
         with c2:
-            entry = st.number_input("Alış Fiyatı", min_value=0.0, value=0.0, step=0.01)
+            weight_options = ["%10", "%15", "%20", "%25", "%30", "%35"]
+            weight_default = st.session_state["portfolio_prefill_weight"] if st.session_state["portfolio_prefill_weight"] in weight_options else "%20"
+            selected_weight = st.selectbox("Portföy Payı", weight_options, index=weight_options.index(weight_default))
         with c3:
-            qty = st.number_input("Adet", min_value=1.0, value=1.0, step=1.0)
+            entry = st.number_input("Alış Fiyatı", min_value=0.0, value=0.0, step=0.01)
         with c4:
-            source = st.selectbox("Kaynak", ["KULLANICI", "ATLAS TRADE"], index=0)
-        note = st.text_input("Not", value="Midas işlemi")
+            qty = st.number_input("Adet", min_value=1.0, value=1.0, step=1.0)
+
+        c5, c6 = st.columns([1, 1])
+        with c5:
+            source_options = ["KULLANICI", "ATLAS TRADE"]
+            source_default = st.session_state["portfolio_prefill_source"] if st.session_state["portfolio_prefill_source"] in source_options else "KULLANICI"
+            source = st.selectbox("Kaynak", source_options, index=source_options.index(source_default))
+        with c6:
+            st.text_input("Mod", value="Önerilenle hızlı ekle" if st.session_state["hizli_ekle_modu"] else "Revize ederek ekle", disabled=True)
+
+        note = st.text_input("Not", value=st.session_state.get("portfolio_prefill_note", "Midas işlemi"))
+        st.caption("Burada payı seçiyorsun. Sonrasında Midas'ta aldığın gerçek fiyatı girip işlemi Atlas'a tanıtıyorsun.")
         submitted = st.form_submit_button("Portföye Ekle", use_container_width=True)
         if submitted:
             if symbol and entry > 0 and qty > 0:
-                add_portfolio_position(symbol, entry, qty, note, source)
+                add_portfolio_position(symbol, entry, qty, f"{note} · Önerilen pay {selected_weight}", source)
                 st.session_state["portfolio_prefill_symbol"] = symbol
-                st.success(f"{symbol} portföye eklendi.")
+                st.session_state["portfolio_prefill_weight"] = selected_weight
+                st.session_state["portfolio_prefill_source"] = source
+                st.session_state["portfolio_prefill_note"] = note
+                st.success(f"{symbol} portföye eklendi. Atlas artık bu işlemi izleyecek.")
                 st.rerun()
             else:
                 st.warning("Varlık, alış fiyatı ve adet bilgisi gerekli.")
