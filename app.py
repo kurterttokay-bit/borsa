@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -116,6 +117,8 @@ def init_db() -> None:
             note TEXT,
             source TEXT DEFAULT 'KULLANICI',
             target_weight REAL DEFAULT 0,
+            asset_type TEXT DEFAULT 'Hisse',
+            coupon_date TEXT DEFAULT '',
             status TEXT DEFAULT 'open'
         )
         """
@@ -133,10 +136,19 @@ def init_db() -> None:
             pnl REAL,
             pnl_pct REAL,
             note TEXT,
-            source TEXT
+            source TEXT,
+            asset_type TEXT DEFAULT 'Hisse'
         )
         """
     )
+    portfolio_cols = [r[1] for r in cur.execute("PRAGMA table_info(portfolio)").fetchall()]
+    if "asset_type" not in portfolio_cols:
+        cur.execute("ALTER TABLE portfolio ADD COLUMN asset_type TEXT DEFAULT 'Hisse'")
+    if "coupon_date" not in portfolio_cols:
+        cur.execute("ALTER TABLE portfolio ADD COLUMN coupon_date TEXT DEFAULT ''")
+    history_cols = [r[1] for r in cur.execute("PRAGMA table_info(trades_history)").fetchall()]
+    if "asset_type" not in history_cols:
+        cur.execute("ALTER TABLE trades_history ADD COLUMN asset_type TEXT DEFAULT 'Hisse'")
     conn.commit()
     conn.close()
 
@@ -187,13 +199,15 @@ def add_portfolio_position(
     note: str = "",
     source: str = "KULLANICI",
     target_weight: float = 0.0,
+    asset_type: str = "Hisse",
+    coupon_date: str = "",
 ) -> None:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO portfolio (created_at, symbol, entry_price, quantity, note, source, target_weight, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'open')
+        INSERT INTO portfolio (created_at, symbol, entry_price, quantity, note, source, target_weight, asset_type, coupon_date, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
         """,
         (
             datetime.now().isoformat(timespec="seconds"),
@@ -203,6 +217,8 @@ def add_portfolio_position(
             note,
             source,
             float(target_weight),
+            asset_type,
+            coupon_date,
         ),
     )
     conn.commit()
@@ -227,19 +243,19 @@ def close_portfolio_position(position_id: int, exit_price: float) -> None:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     row = cur.execute(
-        "SELECT created_at, symbol, entry_price, quantity, note, source FROM portfolio WHERE id = ?",
+        "SELECT created_at, symbol, entry_price, quantity, note, source, asset_type FROM portfolio WHERE id = ?",
         (int(position_id),),
     ).fetchone()
     if row is None:
         conn.close()
         return
-    opened_at, symbol, entry_price, quantity, note, source = row
+    opened_at, symbol, entry_price, quantity, note, source, asset_type = row
     pnl = (float(exit_price) - float(entry_price)) * float(quantity)
     pnl_pct = ((float(exit_price) / float(entry_price)) - 1) * 100 if float(entry_price) else 0.0
     cur.execute(
         """
-        INSERT INTO trades_history (opened_at, closed_at, symbol, entry_price, exit_price, quantity, pnl, pnl_pct, note, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO trades_history (opened_at, closed_at, symbol, entry_price, exit_price, quantity, pnl, pnl_pct, note, source, asset_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             opened_at,
@@ -252,6 +268,7 @@ def close_portfolio_position(position_id: int, exit_price: float) -> None:
             float(pnl_pct),
             note,
             source,
+            asset_type,
         ),
     )
     cur.execute("UPDATE portfolio SET status='closed' WHERE id = ?", (int(position_id),))
@@ -286,14 +303,18 @@ def download_symbol(symbol: str, tf: str) -> pd.DataFrame:
     if not YFINANCE_AVAILABLE:
         return pd.DataFrame()
     cfg = TIMEFRAME_MAP[tf]
-    df = yf.download(
-        tickers=symbol,
-        interval=cfg["interval"],
-        period=cfg["period"],
-        auto_adjust=False,
-        progress=False,
-        threads=False,
-    )
+    try:
+        time.sleep(0.10)
+        df = yf.download(
+            tickers=symbol,
+            interval=cfg["interval"],
+            period=cfg["period"],
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+        )
+    except Exception:
+        return pd.DataFrame()
     if df is None or df.empty:
         return pd.DataFrame()
     if isinstance(df.columns, pd.MultiIndex):
@@ -302,7 +323,8 @@ def download_symbol(symbol: str, tf: str) -> pd.DataFrame:
     required = ["Open", "High", "Low", "Close", "Volume"]
     if any(col not in df.columns for col in required):
         return pd.DataFrame()
-    return df[required].dropna().copy()
+    clean = df[required].replace([np.inf, -np.inf], np.nan).dropna().copy()
+    return clean if not clean.empty else pd.DataFrame()
 
 
 def ema(series: pd.Series, length: int) -> pd.Series:
@@ -362,62 +384,67 @@ def build_risk_levels(df: pd.DataFrame, verdict: str) -> Tuple[Optional[float], 
 
 
 def analyze_symbol(symbol: str, timeframe: str = "1G") -> Tuple[pd.DataFrame, Optional[AnalysisResult], Optional[str]]:
-    raw = download_symbol(symbol, timeframe)
-    if raw.empty:
-        return pd.DataFrame(), None, "Veri alınamadı"
-    df = add_indicators(raw)
-    if len(df) < 50:
-        return pd.DataFrame(), None, "Yetersiz veri"
-    last = df.iloc[-1]
-    score = 50.0
-    if last["Close"] > last["EMA200"]:
-        score += 15
-    else:
-        score -= 15
-    if last["EMA50"] > last["EMA200"]:
-        score += 8
-    else:
-        score -= 8
-    if 50 <= last["RSI14"] <= 68:
-        score += 8
-    elif last["RSI14"] < 40:
-        score -= 7
-    if last["MACD"] > last["MACD_SIGNAL"]:
-        score += 9
-    else:
-        score -= 9
-    score = max(0, min(100, score))
-    if score >= 76:
-        verdict = "GÜÇLÜ AL"
-    elif score >= 60:
-        verdict = "AL"
-    elif score <= 24:
-        verdict = "GÜÇLÜ SAT"
-    elif score <= 40:
-        verdict = "SAT"
-    else:
-        verdict = "İZLE"
-    sl, tp, rr = build_risk_levels(df, verdict)
-    mtf_bias = "UYUMLU YUKARI" if float(last["Close"]) > float(last["EMA200"]) else "UYUMLU AŞAĞI"
-    result = AnalysisResult(
-        symbol=symbol,
-        timeframe=timeframe,
-        close=round(float(last["Close"]), 4),
-        ema200=round(float(last["EMA200"]), 4),
-        rsi=round(float(last["RSI14"]), 2),
-        macd=round(float(last["MACD"]), 4),
-        macd_signal=round(float(last["MACD_SIGNAL"]), 4),
-        atr=round(float(last["ATR14"]), 4) if not pd.isna(last["ATR14"]) else None,
-        market_strength=round(score, 1),
-        long_probability=round(score, 1),
-        short_probability=round(100 - score, 1),
-        verdict=verdict,
-        mtf_bias=mtf_bias,
-        stop_loss=sl,
-        take_profit=tp,
-        rr_ratio=rr,
-    )
-    return df, result, None
+    try:
+        raw = download_symbol(symbol, timeframe)
+        if raw.empty:
+            return pd.DataFrame(), None, "Veri alınamadı"
+        df = add_indicators(raw)
+        if len(df) < 50:
+            return pd.DataFrame(), None, "Yetersiz veri"
+        last = df.iloc[-1]
+        if pd.isna(last["Close"]) or pd.isna(last["EMA200"]) or pd.isna(last["RSI14"]):
+            return pd.DataFrame(), None, "Eksik gösterge verisi"
+        score = 50.0
+        if last["Close"] > last["EMA200"]:
+            score += 15
+        else:
+            score -= 15
+        if last["EMA50"] > last["EMA200"]:
+            score += 8
+        else:
+            score -= 8
+        if 50 <= last["RSI14"] <= 68:
+            score += 8
+        elif last["RSI14"] < 40:
+            score -= 7
+        if last["MACD"] > last["MACD_SIGNAL"]:
+            score += 9
+        else:
+            score -= 9
+        score = max(0, min(100, score))
+        if score >= 76:
+            verdict = "GÜÇLÜ AL"
+        elif score >= 60:
+            verdict = "AL"
+        elif score <= 24:
+            verdict = "GÜÇLÜ SAT"
+        elif score <= 40:
+            verdict = "SAT"
+        else:
+            verdict = "İZLE"
+        sl, tp, rr = build_risk_levels(df, verdict)
+        mtf_bias = "UYUMLU YUKARI" if float(last["Close"]) > float(last["EMA200"]) else "UYUMLU AŞAĞI"
+        result = AnalysisResult(
+            symbol=symbol,
+            timeframe=timeframe,
+            close=round(float(last["Close"]), 4),
+            ema200=round(float(last["EMA200"]), 4),
+            rsi=round(float(last["RSI14"]), 2),
+            macd=round(float(last["MACD"]), 4),
+            macd_signal=round(float(last["MACD_SIGNAL"]), 4),
+            atr=round(float(last["ATR14"]), 4) if not pd.isna(last["ATR14"]) else None,
+            market_strength=round(score, 1),
+            long_probability=round(score, 1),
+            short_probability=round(100 - score, 1),
+            verdict=verdict,
+            mtf_bias=mtf_bias,
+            stop_loss=sl,
+            take_profit=tp,
+            rr_ratio=rr,
+        )
+        return df, result, None
+    except Exception:
+        return pd.DataFrame(), None, "Analiz sırasında hata oluştu"
 
 
 def build_radar(profile_name: str, timeframe: str = "1G", limit: int = 3) -> pd.DataFrame:
@@ -614,6 +641,8 @@ def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
                 "ID": int(row["id"]),
                 "Sembol": symbol,
                 "Kaynak": str(row["source"]),
+                "Varlık Türü": str(row.get("asset_type", "Hisse")),
+                "Kupon Tarihi": str(row.get("coupon_date", "") or ""),
                 "Alış": format_price(float(row["entry_price"])),
                 "Güncel": format_price(current_price) if current_price is not None else "-",
                 "Adet": float(row["quantity"]),
@@ -626,11 +655,17 @@ def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
                 "Stop": format_price(stop) if stop is not None else "-",
                 "Hedef": format_price(target) if target is not None else "-",
                 "Hedef Pay": f"%{round(float(row.get('target_weight', 0))*100, 0)}" if float(row.get("target_weight", 0)) > 0 else "-",
+                "Hedef Pay Sayısal": float(row.get("target_weight", 0) or 0),
                 "Not": str(row["note"] or ""),
                 "Uyarı": alert,
                 "PnL Sayısal": pnl,
+                "Mevcut Pay Sayısal": 0.0,
             }
         )
+    initial_cash = get_initial_cash()
+    portfolio_value = initial_cash + sum(r["PnL Sayısal"] for r in rows)
+    for r in rows:
+        r["Mevcut Pay Sayısal"] = r["Pozisyon Değeri Sayısal"] / max(portfolio_value, 1e-9)
     return rows, invested_now
 
 
@@ -711,12 +746,31 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
                 unsafe_allow_html=True,
             )
     st.markdown(f"**Nakit önerisi:** {format_price(cash)} nakdin var. Bunun {format_price(riskable)} kadarı yeni fırsatlar için risk alanı olarak düşünülebilir. Kalan nakit SGOV / PPF tarafında bekleyebilir.")
-    radar = build_radar(profile_name, "1G", 3)
-    if radar.empty:
-        st.info("Bugün profile uygun yeni Atlas işlemi bulunamadı.")
-    else:
+
+    radar = build_radar(profile_name, "1G", 10)
+    open_map = {row["Sembol"]: row for row in rows}
+    yeni_firsatlar: List[Dict[str, Any]] = []
+    artirilabilirler: List[Dict[str, Any]] = []
+
+    if not radar.empty:
+        for _, item in radar.iterrows():
+            sembol = str(item["Sembol"])
+            if sembol not in open_map:
+                yeni_firsatlar.append(item.to_dict())
+                continue
+            mevcut = open_map[sembol]
+            hedef_pay = float(mevcut.get("Hedef Pay Sayısal", 0) or 0)
+            mevcut_pay = float(mevcut.get("Mevcut Pay Sayısal", 0) or 0)
+            skor = float(item["Atlas Skoru"])
+            if hedef_pay > 0 and mevcut_pay < max(hedef_pay - 0.03, 0) and skor >= 85:
+                z = item.to_dict()
+                z["Mevcut Pay"] = f"%{round(mevcut_pay * 100, 2)}"
+                z["Hedef Pay"] = f"%{round(hedef_pay * 100, 2)}"
+                artirilabilirler.append(z)
+
+    if yeni_firsatlar:
         st.markdown("#### Yeni Atlas Fırsatları")
-        for i, (_, row) in enumerate(radar.iterrows()):
+        for i, row in enumerate(yeni_firsatlar[:3]):
             onerilen_tutar = max(10.0, min(riskable, cash * 0.5 if cash > 0 else 0.0))
             st.markdown(
                 f"<div class='radar-card'><div class='radar-title'>{row['Sembol']} · {row['Karar']}</div><div class='radar-meta'>Atlas Skoru: %{row['Atlas Skoru']} · Risk/Getiri: {row['Risk/Getiri']} · Önerilen pozisyon: {format_price(onerilen_tutar)}</div></div>",
@@ -732,6 +786,27 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
                     st.success(f"{row['Sembol']} yeni işlem formuna aktarıldı.")
             with c2:
                 st.caption(f"Stop: {format_price(row['Stop'])} · Hedef: {format_price(row['Hedef'])}")
+
+    if artirilabilirler:
+        st.markdown("#### Pozisyon Artırılabilirler")
+        for i, row in enumerate(artirilabilirler[:3]):
+            st.markdown(
+                f"<div class='radar-card'><div class='radar-title'>{row['Sembol']} · Pozisyon artırılabilir</div><div class='radar-meta'>Atlas Skoru: %{row['Atlas Skoru']} · Mevcut Pay: {row['Mevcut Pay']} · Hedef Pay: {row['Hedef Pay']}</div></div>",
+                unsafe_allow_html=True,
+            )
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if st.button(f"{row['Sembol']} artırma formu", key=f"boost_{row['Sembol']}_{i}", use_container_width=True):
+                    st.session_state["portfolio_prefill_symbol"] = str(row['Sembol'])
+                    st.session_state["portfolio_prefill_weight"] = row['Hedef Pay']
+                    st.session_state["portfolio_prefill_source"] = "ATLAS TRADE"
+                    st.session_state["portfolio_prefill_note"] = f"Atlas artırma fırsatı · Skor %{row['Atlas Skoru']}"
+                    st.success(f"{row['Sembol']} artırma için yeni işlem formuna aktarıldı.")
+            with c2:
+                st.caption(f"Stop: {format_price(row['Stop'])} · Hedef: {format_price(row['Hedef'])}")
+
+    if not yeni_firsatlar and not artirilabilirler:
+        st.info("Şu an yeni fırsat veya artırılabilir pozisyon görünmüyor.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -820,6 +895,8 @@ def render_initial_portfolio_builder(profile_name: str) -> None:
                             f"Atlas önerisi · {item['Not']} · Önerilen pay {item['Pay Yazı']}",
                             "ATLAS TRADE",
                             float(item["Pay"]),
+                            item["Tür"],
+                            "",
                         )
                         st.success(f"{sembol} portföye eklendi. Atlas artık bu işlemi izleyecek.")
                         st.session_state["atlas_hazir_portfoy"] = [x for x in hazir_portfoy if x["Varlık"] != sembol]
@@ -895,6 +972,8 @@ def render_add_position(default_symbol: str) -> None:
             source = st.selectbox("Kaynak", source_options, index=source_options.index(source_default))
         with c6:
             st.text_input("Mod", value="Önerilenle hızlı ekle" if source == "ATLAS TRADE" else "Manuel ekleme", disabled=True)
+        asset_type = st.selectbox("Varlık Türü", ["Hisse", "ETF", "Altın ETF", "Tahvil ETF", "PPF / Nakit Park", "Eurobond"], index=0)
+        coupon_date = st.text_input("Kupon Tarihi (Eurobond ise)", value="", placeholder="2026-06-15")
         note = st.text_input("Not", value=st.session_state.get("portfolio_prefill_note", "Midas işlemi"))
 
         selected_weight_value = float(selected_weight.replace("%", "").replace(",", ".")) / 100.0
@@ -910,7 +989,7 @@ def render_add_position(default_symbol: str) -> None:
         submitted = st.form_submit_button("Portföye Ekle", use_container_width=True)
         if submitted:
             if symbol and entry > 0 and qty > 0:
-                add_portfolio_position(symbol, entry, qty, f"{note} · Önerilen pay {selected_weight}", source, selected_weight_value)
+                add_portfolio_position(symbol, entry, qty, f"{note} · Önerilen pay {selected_weight}", source, selected_weight_value, asset_type, coupon_date)
                 st.session_state["portfolio_prefill_symbol"] = symbol
                 st.session_state["portfolio_prefill_weight"] = selected_weight
                 st.session_state["portfolio_prefill_source"] = source
@@ -974,6 +1053,90 @@ def render_performance_cards(open_rows: List[Dict[str, Any]], portfolio_value: f
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+def render_performance_cards(open_rows: List[Dict[str, Any]], portfolio_value: float) -> None:
+    history_df = load_history(200)
+    closed_count = len(history_df)
+    win_rate = 0.0
+    avg_pnl_pct = 0.0
+    realized_pnl = 0.0
+    confidence_score = 50.0
+    atlas_vs_nasdaq = 0.0
+
+    if not history_df.empty:
+        win_rate = float((history_df["pnl"] > 0).mean() * 100)
+        avg_pnl_pct = float(history_df["pnl_pct"].mean())
+        realized_pnl = float(history_df["pnl"].sum())
+
+    unrealized_pnl = float(sum(row["PnL Sayısal"] for row in open_rows)) if open_rows else 0.0
+    total_pnl = realized_pnl + unrealized_pnl
+    atlas_return_pct = ((portfolio_value / max(get_initial_cash(), 1e-9)) - 1) * 100
+    nasdaq_proxy_pct = 1.8
+    atlas_vs_nasdaq = atlas_return_pct - nasdaq_proxy_pct
+
+    if closed_count == 0:
+        confidence_score = 55.0 if len(open_rows) > 0 else 50.0
+    else:
+        confidence_score = max(0.0, min(100.0, (win_rate * 0.55) + (max(avg_pnl_pct, 0) * 6) + min(closed_count, 20)))
+
+    best_asset = "-"
+    best_asset_pnl = None
+    if open_rows:
+        sorted_rows = sorted(open_rows, key=lambda x: x["PnL Sayısal"], reverse=True)
+        best_asset = sorted_rows[0]["Sembol"]
+        best_asset_pnl = sorted_rows[0]["PnL Sayısal"]
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Performans Özeti</div><div class="section-sub">İsteyen için daha derin performans görünümü. Atlas vs piyasa ve sistem güven sinyalleri burada görünür.</div>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Toplam Getiri", f"%{round(float(atlas_return_pct), 2)}", f"{format_price(total_pnl)}")
+    c2.metric("Atlas vs Nasdaq", f"%{round(float(atlas_vs_nasdaq), 2)}", f"Nasdaq %{nasdaq_proxy_pct}")
+    c3.metric("Başarılı İşlem Oranı", f"%{round(float(win_rate), 1)}", f"{closed_count} kapanan işlem")
+    c4.metric("Atlas Güven Skoru", f"{round(float(confidence_score), 0)}/100", f"Ort. %{round(float(avg_pnl_pct), 2)}")
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Gerçekleşen Kar/Zarar", format_price(realized_pnl), "Kapanan işlemler")
+    d2.metric("Açık Pozisyon Kar/Zarar", format_price(unrealized_pnl), f"{len(open_rows)} açık işlem")
+    d3.metric("En İyi Açık Pozisyon", best_asset, format_price(best_asset_pnl) if best_asset_pnl is not None else "-")
+    d4.metric("Portföy Verimliliği", f"%{round(float((win_rate + max(atlas_return_pct, 0)) / 2), 1)}", "Atlas iç metriği")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_cashflow_calendar(open_rows: List[Dict[str, Any]]) -> None:
+    eurobonds = [r for r in open_rows if r.get("Varlık Türü") == "Eurobond" and str(r.get("Kupon Tarihi", "")).strip()]
+    if not eurobonds:
+        return
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Nakit Akış Takvimi</div><div class="section-sub">Eurobond kupon tarihleri burada takip edilir.</div>', unsafe_allow_html=True)
+    data = [{"Varlık": i["Sembol"], "Kupon Tarihi": i["Kupon Tarihi"], "Not": i["Not"]} for i in eurobonds]
+    st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_correlation_matrix(open_rows: List[Dict[str, Any]]) -> None:
+    symbols = [r["Sembol"] for r in open_rows if r.get("Varlık Türü") in ["Hisse", "ETF", "Altın ETF", "Tahvil ETF"]][:5]
+    if len(symbols) < 2:
+        return
+    series_map: Dict[str, pd.Series] = {}
+    for sym in symbols:
+        raw = download_symbol(sym, "1G")
+        if raw.empty:
+            continue
+        returns = raw["Close"].pct_change().dropna().tail(90)
+        if not returns.empty:
+            series_map[sym] = returns
+    if len(series_map) < 2:
+        return
+    corr_df = pd.DataFrame(series_map).corr().round(2)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Korelasyon Matrisi</div><div class="section-sub">Portföyündeki ilk 5 varlığın ne kadar benzer hareket ettiğini gösterir.</div>', unsafe_allow_html=True)
+    if PLOTLY_AVAILABLE:
+        fig = go.Figure(data=go.Heatmap(z=corr_df.values, x=corr_df.columns, y=corr_df.index, zmin=-1, zmax=1))
+        fig.update_layout(height=360, template="plotly_dark", paper_bgcolor="#111827", plot_bgcolor="#111827", margin=dict(l=10, r=10, t=20, b=10))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.dataframe(corr_df, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
 def render_history_tab() -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Geçmiş İşlemler</div><div class="section-sub">Kapatılmış işlemler, gerçekleşen kar/zarar ve işlem geçmişi.</div>', unsafe_allow_html=True)
@@ -985,7 +1148,8 @@ def render_history_tab() -> None:
         for col in ["entry_price", "exit_price", "pnl"]:
             show[col] = show[col].apply(lambda x: format_price(float(x)))
         show["pnl_pct"] = show["pnl_pct"].apply(lambda x: f"%{round(float(x), 2)}")
-        st.dataframe(show[["symbol", "source", "entry_price", "exit_price", "pnl", "pnl_pct", "closed_at"]], use_container_width=True, hide_index=True)
+        cols = [c for c in ["symbol", "source", "asset_type", "entry_price", "exit_price", "pnl", "pnl_pct", "closed_at"] if c in show.columns]
+        st.dataframe(show[cols], use_container_width=True, hide_index=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -1007,6 +1171,8 @@ def main_streamlit() -> None:
         render_open_positions(open_rows, portfolio_value)
         render_action_center(open_rows, cash, riskable, profile_name)
         render_performance_cards(open_rows, portfolio_value)
+        render_cashflow_calendar(open_rows)
+        render_correlation_matrix(open_rows)
     with tabs[1]:
         render_add_position(DEFAULT_SYMBOLS[0])
     with tabs[2]:
