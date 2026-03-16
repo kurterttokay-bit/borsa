@@ -806,6 +806,8 @@ def inject_css() -> None:
         .radar-card { background:#0F172A; border:1px solid rgba(148,163,184,0.08); border-radius:18px; padding:16px; margin-bottom:10px; }
         .radar-title { color:#F8FAFC; font-size:1rem; font-weight:800; }
         .radar-meta { color:#94A3B8; font-size:0.85rem; margin-top:4px; }
+        .flow-step { color:#CBD5E1; font-size:0.92rem; margin-bottom:12px; }
+        .flow-arrow { text-align:center; font-size:1.2rem; color:#94A3B8; margin:8px 0; }
         .flow-step { color:#E2E8F0; font-size:0.95rem; font-weight:700; padding:10px 12px; border-radius:14px; background:#0F172A; border:1px solid rgba(148,163,184,0.08); margin:8px 0; text-align:center; }
         .flow-arrow { text-align:center; color:#64748B; font-size:1.2rem; margin:2px 0; }
         </style>
@@ -822,7 +824,7 @@ def render_topbar() -> None:
                 <div class="brand-title">{APP_TITLE}</div>
                 <div class="brand-sub">{APP_SUBTITLE}</div>
             </div>
-            <div style="color:#94A3B8;font-size:0.9rem;">Atlas artık trade ile nakit hareketlerini ayrı izler.</div>
+            <div style="color:#94A3B8;font-size:0.9rem;">Dolar bazlı portföyünü sade, güven veren ve takip etmesi kolay şekilde yönet.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1591,14 +1593,216 @@ def render_history_tab() -> None:
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+def get_radar_sections(rows: List[Dict[str, Any]], cash: float, riskable: float, profile_name: str) -> Dict[str, Any]:
+    radar = build_radar(profile_name, "1G", 12)
+    open_map = {row["Sembol"]: row for row in rows}
+    yeni_firsatlar: List[Dict[str, Any]] = []
+    artirilabilirler: List[Dict[str, Any]] = []
+    kar_alinabilirler: List[Dict[str, Any]] = []
+
+    if not radar.empty:
+        for _, item in radar.iterrows():
+            sembol = str(item["Sembol"])
+            row = item.to_dict()
+            skor = float(row.get("Atlas Skoru", 0) or 0)
+            if sembol not in open_map:
+                row["Aksiyon"] = "Yeni pozisyon"
+                row["Mesaj"] = "Portföyde yok. Ağırlık dengesini bozmadan küçük bir başlangıç düşünülebilir."
+                row["Önerilen Tutar"] = max(10.0, min(riskable, cash * 0.35 if cash > 0 else 0.0))
+                yeni_firsatlar.append(row)
+                continue
+
+            mevcut = open_map[sembol]
+            hedef_pay = float(mevcut.get("Hedef Pay Sayısal", 0) or 0)
+            mevcut_pay = float(mevcut.get("Mevcut Pay Sayısal", 0) or 0)
+            pnl_pct = float(mevcut.get("PnL % Sayısal", 0) or 0)
+            if hedef_pay > 0 and mevcut_pay < max(hedef_pay - 0.03, 0) and skor >= 85:
+                row["Aksiyon"] = "Ekleme fırsatı"
+                row["Mesaj"] = "Portföyde mevcut. Hedef ağırlığın altında kaldığı için kademeli ekleme düşünülebilir."
+                row["Mevcut Pay"] = f"%{round(mevcut_pay * 100, 2)}"
+                row["Hedef Pay"] = f"%{round(hedef_pay * 100, 2)}"
+                row["Önerilen Tutar"] = max(10.0, min(riskable * 0.6, cash * 0.25 if cash > 0 else 0.0))
+                artirilabilirler.append(row)
+            elif pnl_pct >= 12 and skor >= 88:
+                row["Aksiyon"] = "Kar alma"
+                row["Mesaj"] = "Güzel bir getiri oluşmuş görünüyor. Karın bir kısmı korunabilir."
+                row["PnL %"] = f"%{round(pnl_pct, 2)}"
+                kar_alinabilirler.append(row)
+
+    toplam = len(yeni_firsatlar) + len(artirilabilirler) + len(kar_alinabilirler)
+    return {
+        "radar": radar,
+        "toplam": toplam,
+        "yeni": yeni_firsatlar,
+        "ekleme": artirilabilirler,
+        "kar_al": kar_alinabilirler,
+    }
+
+
+def render_dashboard_chart_equity(snapshot: Dict[str, float]) -> None:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Toplam Varlık Görünümü</div><div class="section-sub">Net sermaye ile bugünkü toplam varlığı tek bakışta gör.</div>', unsafe_allow_html=True)
+    if PLOTLY_AVAILABLE:
+        labels = ["Net Sermaye", "Toplam Varlık"]
+        values = [float(snapshot["net_capital"]), float(snapshot["current_equity"])]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=labels, y=values, mode="lines+markers", fill="tozeroy"))
+        fig.update_layout(height=280, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#E5E7EB'))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.metric("Net Sermaye", format_price(snapshot["net_capital"]))
+        st.metric("Toplam Varlık", format_price(snapshot["current_equity"]))
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_dashboard_chart_allocation(open_rows: List[Dict[str, Any]], snapshot: Dict[str, float]) -> None:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Portföy Dağılımı</div><div class="section-sub">ETF, hisse ve nakdin portföy içindeki ağırlığı.</div>', unsafe_allow_html=True)
+    bucket: Dict[str, float] = {}
+    for row in open_rows:
+        varlik_turu = str(row.get("Varlık Türü", "Hisse"))
+        bucket[varlik_turu] = bucket.get(varlik_turu, 0.0) + float(row.get("Pozisyon Değeri Sayısal", 0) or 0)
+    if float(snapshot.get("cash", 0) or 0) > 0:
+        bucket["Nakit"] = float(snapshot["cash"])
+    if not bucket:
+        st.info("Dağılım oluşması için portföye varlık ekleyebilirsin.")
+    elif PLOTLY_AVAILABLE:
+        fig = go.Figure(data=[go.Pie(labels=list(bucket.keys()), values=list(bucket.values()), hole=0.55)])
+        fig.update_layout(height=280, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#E5E7EB'))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        show = pd.DataFrame({"Varlık Türü": list(bucket.keys()), "Tutar": [format_price(v) for v in bucket.values()]})
+        st.dataframe(show, use_container_width=True, hide_index=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_today_atlas_found(radar_sections: Dict[str, Any]) -> None:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Bugün Atlas Ne Buldu?</div><div class="section-sub">Sakin ve seçici radar mantığıyla öne çıkan fırsatlar.</div>', unsafe_allow_html=True)
+    if radar_sections["toplam"] == 0:
+        st.info("Bugün izlenebilir bir fırsat görünmüyor. Bu da Atlas için normal ve sağlıklı bir sonuç.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    shown = 0
+    for group_name, items in [("Ekleme", radar_sections["ekleme"]), ("Yeni", radar_sections["yeni"]), ("Kar Al", radar_sections["kar_al"] )]:
+        for i, row in enumerate(items[:2]):
+            shown += 1
+            st.markdown(
+                f"<div class='radar-card'><div class='radar-title'>{row['Sembol']} · {row['Aksiyon']}</div><div class='radar-meta'>Atlas Skoru: %{row['Atlas Skoru']} · Risk/Getiri: {row['Risk/Getiri']}</div><div style='color:#CBD5E1;margin-top:8px;'>{row['Mesaj']}</div></div>",
+                unsafe_allow_html=True,
+            )
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if row["Aksiyon"] == "Kar alma":
+                    st.caption(f"Açık getiri: {row.get('PnL %', '-')}")
+                else:
+                    onerilen = row.get("Önerilen Tutar", 0.0)
+                    st.caption(f"Önerilen tutar: {format_price(float(onerilen))}")
+            with c2:
+                if st.button(f"{row['Sembol']} yeni işleme aktar", key=f"dash_push_{group_name}_{row['Sembol']}_{i}", use_container_width=True):
+                    push_prefill_to_new_trade(str(row["Sembol"]), "%15", "ATLAS TRADE", f"{row['Aksiyon']} · Skor %{row['Atlas Skoru']}")
+                    st.session_state["active_page"] = "➕ Yeni İşlem"
+                    st.success(f"{row['Sembol']} yeni işleme aktarıldı.")
+                    st.rerun()
+            if shown >= 4:
+                break
+        if shown >= 4:
+            break
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_dashboard_page(profile_name: str, open_rows: List[Dict[str, Any]], snapshot: Dict[str, float]) -> None:
+    radar_sections = get_radar_sections(open_rows, snapshot["cash"], snapshot["riskable"], profile_name)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Gösterge Paneli</div><div class="section-sub">Dolar bazlı portföyünü tek bakışta takip et. Atlas bugün ne buldu, aşağıda gör.</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="metric-grid">
+            <div class="metric-card"><div class="metric-label">Toplam Varlık</div><div class="metric-value">{format_price(snapshot['current_equity'])}</div></div>
+            <div class="metric-card"><div class="metric-label">Net Sermaye</div><div class="metric-value">{format_price(snapshot['net_capital'])}</div></div>
+            <div class="metric-card"><div class="metric-label">Sistem Getirisi</div><div class="metric-value">%{round(float(snapshot['total_return_pct']), 2)}</div></div>
+            <div class="metric-card"><div class="metric-label">Bugünkü Radar</div><div class="metric-value">{radar_sections['toplam']} fırsat</div></div>
+        </div>
+        <div class="metric-grid" style="margin-top:12px;">
+            <div class="metric-card"><div class="metric-label">Nakit</div><div class="metric-value">{format_price(snapshot['cash'])}</div></div>
+            <div class="metric-card"><div class="metric-label">Açık K/Z</div><div class="metric-value">{format_price(snapshot['unrealized_pnl'])}</div></div>
+            <div class="metric-card"><div class="metric-label">Net Temettü</div><div class="metric-value">{format_price(snapshot['dividend_income'])}</div></div>
+            <div class="metric-card"><div class="metric-label">Tahmini Vergi Etkisi</div><div class="metric-value">{format_try(snapshot['estimated_tax_try'])}</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    left, right = st.columns([1.2, 0.8])
+    with left:
+        render_dashboard_chart_equity(snapshot)
+    with right:
+        render_dashboard_chart_allocation(open_rows, snapshot)
+
+    render_today_atlas_found(radar_sections)
+
+
+def render_radar_page(profile_name: str, open_rows: List[Dict[str, Any]], snapshot: Dict[str, float]) -> None:
+    radar_sections = get_radar_sections(open_rows, snapshot["cash"], snapshot["riskable"], profile_name)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Fırsat Radarı</div><div class="section-sub">Atlas bugün tüm evrende seçici bir tarama yaptı. Yalın dilde öne çıkanları burada görürsün.</div>', unsafe_allow_html=True)
+    total_scanned = len(RISKY_UNIVERSE)
+    st.markdown(
+        f"""
+        <div class="metric-grid">
+            <div class="metric-card"><div class="metric-label">Taranan Varlık</div><div class="metric-value">{total_scanned}</div></div>
+            <div class="metric-card"><div class="metric-label">İzlenebilir Fırsat</div><div class="metric-value">{len(radar_sections['yeni'])}</div></div>
+            <div class="metric-card"><div class="metric-label">Ekleme Fırsatı</div><div class="metric-value">{len(radar_sections['ekleme'])}</div></div>
+            <div class="metric-card"><div class="metric-label">Kar Alma</div><div class="metric-value">{len(radar_sections['kar_al'])}</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    sections = [
+        ("Ekleme fırsatları", radar_sections["ekleme"]),
+        ("Yeni pozisyon adayları", radar_sections["yeni"]),
+        ("Kar alma sinyalleri", radar_sections["kar_al"]),
+    ]
+    for title, items in sections:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
+        if not items:
+            st.caption("Şu an öne çıkan bir aksiyon görünmüyor.")
+            st.markdown('</div>', unsafe_allow_html=True)
+            continue
+        for i, row in enumerate(items[:6]):
+            st.markdown(
+                f"<div class='radar-card'><div class='radar-title'>{row['Sembol']} · {row['Aksiyon']}</div><div class='radar-meta'>Atlas Skoru: %{row['Atlas Skoru']} · Risk/Getiri: {row['Risk/Getiri']} · Stop: {format_price(row['Stop'])} · Hedef: {format_price(row['Hedef'])}</div><div style='color:#CBD5E1;margin-top:8px;'>{row['Mesaj']}</div></div>",
+                unsafe_allow_html=True,
+            )
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if row["Aksiyon"] != "Kar alma":
+                    st.caption(f"Önerilen tutar: {format_price(float(row.get('Önerilen Tutar', 0.0)))}")
+                else:
+                    st.caption(f"Açık getiri: {row.get('PnL %', '-')}")
+            with c2:
+                if row["Aksiyon"] == "Kar alma":
+                    st.button(f"{row['Sembol']} izlemeye devam et", key=f"watch_{title}_{row['Sembol']}_{i}", use_container_width=True)
+                else:
+                    if st.button(f"{row['Sembol']} yeni işleme aktar", key=f"radar_push_{title}_{row['Sembol']}_{i}", use_container_width=True):
+                        push_prefill_to_new_trade(str(row["Sembol"]), "%15", "ATLAS TRADE", f"{row['Aksiyon']} · Skor %{row['Atlas Skoru']}")
+                        st.session_state["active_page"] = "➕ Yeni İşlem"
+                        st.success(f"{row['Sembol']} yeni işleme aktarıldı.")
+                        st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
 def render_sidebar_navigation() -> str:
     if "active_page" not in st.session_state:
-        st.session_state["active_page"] = "👜 Portföy"
-    page = st.sidebar.radio(
-        "Sayfalar",
-        ["👜 Portföy", "➕ Yeni İşlem", "🗃️ Geçmiş"],
-        index=["👜 Portföy", "➕ Yeni İşlem", "🗃️ Geçmiş"].index(st.session_state["active_page"]),
-    )
+        st.session_state["active_page"] = "🏠 Dashboard"
+    pages = ["🏠 Dashboard", "👜 Portföy", "🔎 Radar", "➕ Yeni İşlem", "🗃️ Geçmiş"]
+    current = st.session_state["active_page"] if st.session_state.get("active_page") in pages else pages[0]
+    page = st.sidebar.radio("Sayfalar", pages, index=pages.index(current))
     st.session_state["active_page"] = page
     return page
 
@@ -1617,7 +1821,9 @@ def main_streamlit() -> None:
     open_rows, invested_now = build_open_positions()
     snapshot = compute_portfolio_snapshot(open_rows, invested_now)
 
-    if page == "👜 Portföy":
+    if page == "🏠 Dashboard":
+        render_dashboard_page(profile_name, open_rows, snapshot)
+    elif page == "👜 Portföy":
         if not open_rows:
             render_initial_portfolio_builder(profile_name)
         render_portfolio_overview(open_rows, snapshot)
@@ -1625,6 +1831,8 @@ def main_streamlit() -> None:
         render_action_center(open_rows, snapshot["cash"], snapshot["riskable"], profile_name)
         render_performance_cards(open_rows, snapshot)
         render_cashflow_calendar(open_rows)
+    elif page == "🔎 Radar":
+        render_radar_page(profile_name, open_rows, snapshot)
     elif page == "➕ Yeni İşlem":
         render_add_position(DEFAULT_SYMBOLS[0])
     else:
