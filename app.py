@@ -270,6 +270,43 @@ def convert_money(value: Optional[float]) -> Optional[float]:
         return float(value) * get_usdtry_rate()
     return float(value)
 
+@cache_data(ttl=300, show_spinner=False)
+def get_latest_symbol_price(symbol: str) -> Optional[float]:
+    if not YFINANCE_AVAILABLE:
+        return None
+    try:
+        df = yf.download(symbol, period="5d", interval="1d", progress=False, threads=False, auto_adjust=False)
+        if df is None or df.empty:
+            return None
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [c[0] for c in df.columns]
+        close = pd.to_numeric(df["Close"], errors="coerce").dropna()
+        if close.empty:
+            return None
+        return float(close.iloc[-1])
+    except Exception:
+        return None
+
+
+def format_symbol_live_price(symbol: str) -> str:
+    last_price = get_latest_symbol_price(symbol)
+    if last_price is None:
+        return "-"
+    return format_price(last_price)
+
+
+def get_prefill_entry_price(symbol: str) -> float:
+    key = "portfolio_prefill_entry"
+    existing_symbol = st.session_state.get("portfolio_prefill_symbol", "") if STREAMLIT_AVAILABLE else ""
+    existing_value = st.session_state.get(key, None) if STREAMLIT_AVAILABLE else None
+    if existing_symbol == symbol and existing_value not in [None, ""]:
+        try:
+            return float(existing_value)
+        except Exception:
+            pass
+    latest_price = get_latest_symbol_price(symbol)
+    return round(float(latest_price), 4) if latest_price is not None else 0.0
+
 
 def infer_initial_cash() -> float:
     open_df = load_open_portfolio()
@@ -994,11 +1031,16 @@ def compute_portfolio_snapshot(open_rows: List[Dict[str, Any]], invested_now: fl
     }
 
 
-def push_prefill_to_new_trade(symbol: str, weight: str, source: str, note: str) -> None:
+def push_prefill_to_new_trade(symbol: str, weight: str, source: str, note: str, entry_price: Optional[float] = None) -> None:
     st.session_state["portfolio_prefill_symbol"] = symbol
     st.session_state["portfolio_prefill_weight"] = weight
     st.session_state["portfolio_prefill_source"] = source
     st.session_state["portfolio_prefill_note"] = note
+    inferred_price = entry_price if entry_price is not None else get_latest_symbol_price(symbol)
+    if inferred_price is not None:
+        st.session_state["portfolio_prefill_entry"] = round(float(inferred_price), 4)
+    else:
+        st.session_state["portfolio_prefill_entry"] = 0.0
     st.session_state["active_page"] = "➕ Yeni İşlem"
 
 
@@ -1193,8 +1235,9 @@ def render_initial_portfolio_builder(profile_name: str) -> None:
         for idx, item in enumerate(selectable_suggestions):
             sembol = item["Varlık"]
             varsayilan = st.session_state["atlas_secili_portfoy"].get(sembol, False)
+            canli_fiyat = format_symbol_live_price(sembol)
             secildi = st.checkbox(
-                f"{sembol} · {item['Tür']} · {item['Pay Yazı']}",
+                f"{sembol} · {item['Tür']} · {item['Pay Yazı']} · Son fiyat {canli_fiyat}",
                 value=varsayilan,
                 key=f"atlas_select_{sembol}_{idx}",
             )
@@ -1221,7 +1264,7 @@ def render_initial_portfolio_builder(profile_name: str) -> None:
                             "Pay Yazı": item["Pay Yazı"],
                             "Not": item["Not"],
                             "Midas Alındı": False,
-                            "Alış Fiyatı": 0.0,
+                            "Alış Fiyatı": round(float(get_latest_symbol_price(item["Varlık"]) or 0.0), 4),
                             "Adet": 0.0,
                         }
                     )
@@ -1236,7 +1279,8 @@ def render_initial_portfolio_builder(profile_name: str) -> None:
 
         for idx, item in enumerate(hazir_portfoy):
             sembol = item["Varlık"]
-            st.markdown(f"**{sembol}** · {item['Tür']} · Önerilen pay {item['Pay Yazı']}")
+            canli_fiyat = format_symbol_live_price(sembol)
+            st.markdown(f"**{sembol}** · {item['Tür']} · Önerilen pay {item['Pay Yazı']} · Son fiyat {canli_fiyat}")
 
             key_alindi = f"midas_alindi_{sembol}_{idx}"
             key_alis = f"alis_fiyati_{sembol}_{idx}"
@@ -1350,6 +1394,8 @@ def render_position_form(default_symbol: str) -> None:
         st.session_state["portfolio_prefill_source"] = "KULLANICI"
     if "portfolio_prefill_note" not in st.session_state:
         st.session_state["portfolio_prefill_note"] = "Midas işlemi"
+    if "portfolio_prefill_entry" not in st.session_state:
+        st.session_state["portfolio_prefill_entry"] = get_prefill_entry_price(st.session_state["portfolio_prefill_symbol"])
 
     default_idx = SEARCHABLE_ASSETS.index(st.session_state["portfolio_prefill_symbol"]) if st.session_state["portfolio_prefill_symbol"] in SEARCHABLE_ASSETS else 0
     open_rows, invested_now = build_open_positions()
@@ -1359,12 +1405,16 @@ def render_position_form(default_symbol: str) -> None:
         c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
         with c1:
             symbol = st.selectbox("Varlık Ara", SEARCHABLE_ASSETS, index=default_idx)
+            latest_for_symbol = get_latest_symbol_price(symbol)
         with c2:
             weight_options = ["%10", "%15", "%20", "%25", "%30", "%35"]
             weight_default = st.session_state["portfolio_prefill_weight"] if st.session_state["portfolio_prefill_weight"] in weight_options else "%20"
             selected_weight = st.selectbox("Portföy Payı", weight_options, index=weight_options.index(weight_default))
         with c3:
-            entry = st.number_input("Alış Fiyatı", min_value=0.0, value=0.0, step=0.01)
+            prefill_entry = float(st.session_state.get("portfolio_prefill_entry", 0.0) or 0.0)
+            if symbol != st.session_state.get("portfolio_prefill_symbol") and latest_for_symbol is not None:
+                prefill_entry = round(float(latest_for_symbol), 4)
+            entry = st.number_input("Alış Fiyatı", min_value=0.0, value=float(prefill_entry), step=0.01)
         with c4:
             qty = st.number_input("Adet", min_value=0.0001, value=1.0, step=0.1)
         c5, c6 = st.columns([1, 1])
@@ -1383,8 +1433,9 @@ def render_position_form(default_symbol: str) -> None:
         equity_after = snapshot["current_equity"]
         pct_after = (position_value_preview / max(equity_after, 1e-9)) * 100 if position_value_preview > 0 else 0.0
 
+        canli_fiyat_yazi = format_price(latest_for_symbol) if latest_for_symbol is not None else "-"
         st.markdown(
-            f"**Ön İzleme:** Pozisyon değeri {format_price(position_value_preview)} · Mevcut toplam varlık {format_price(snapshot['current_equity'])} · Bu işlemin yaklaşık payı %{round(float(pct_after), 2)} · Hedeflenen pay {selected_weight}"
+            f"**Ön İzleme:** Son fiyat {canli_fiyat_yazi} · Pozisyon değeri {format_price(position_value_preview)} · Mevcut toplam varlık {format_price(snapshot['current_equity'])} · Bu işlemin yaklaşık payı %{round(float(pct_after), 2)} · Hedeflenen pay {selected_weight}"
         )
         if pct_after > 40:
             st.warning("Bu işlem portföyde çok büyük ağırlık oluşturuyor. Oranı veya adedi düşürmek daha sağlıklı olabilir.")
@@ -1397,6 +1448,7 @@ def render_position_form(default_symbol: str) -> None:
                 st.session_state["portfolio_prefill_weight"] = selected_weight
                 st.session_state["portfolio_prefill_source"] = source
                 st.session_state["portfolio_prefill_note"] = note
+                st.session_state["portfolio_prefill_entry"] = entry
                 st.success(f"{symbol} portföye eklendi.")
                 st.rerun()
             else:
@@ -1409,6 +1461,7 @@ def render_position_form(default_symbol: str) -> None:
             st.session_state["portfolio_prefill_weight"] = "%20"
             st.session_state["portfolio_prefill_source"] = "KULLANICI"
             st.session_state["portfolio_prefill_note"] = "Midas işlemi"
+            st.session_state["portfolio_prefill_entry"] = get_prefill_entry_price(default_symbol)
             st.rerun()
     with c2:
         st.caption("Atlas fırsatlarından gelen semboller burada otomatik açılır.")
