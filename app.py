@@ -1810,7 +1810,7 @@ def render_history_tab() -> None:
 def get_radar_sections(rows: List[Dict[str, Any]], cash: float, riskable: float, profile_name: str) -> Dict[str, Any]:
     radar = build_radar(profile_name, "1G", 12)
     open_map = {row["Sembol"]: row for row in rows}
-    cart_symbols = get_radar_cart_symbols() if STREAMLIT_AVAILABLE else set()
+    local_cart_symbols = get_radar_cart_symbols() if STREAMLIT_AVAILABLE else set()
     yeni_firsatlar: List[Dict[str, Any]] = []
     artirilabilirler: List[Dict[str, Any]] = []
     kar_alinabilirler: List[Dict[str, Any]] = []
