@@ -1153,6 +1153,50 @@ def push_prefill_to_new_trade(symbol: str, weight: str, source: str, note: str, 
     st.session_state["active_page"] = "➕ Yeni İşlem"
 
 
+
+def get_radar_cart() -> List[Dict[str, Any]]:
+    if "radar_cart" not in st.session_state:
+        st.session_state["radar_cart"] = []
+    return st.session_state["radar_cart"]
+
+
+def get_radar_cart_symbols() -> set:
+    return {str(item.get("Sembol", "")) for item in get_radar_cart()}
+
+
+def add_to_radar_cart(row: Dict[str, Any]) -> bool:
+    cart = get_radar_cart()
+    symbol = str(row.get("Sembol", "")).upper()
+    if symbol in {str(item.get("Sembol", "")).upper() for item in cart}:
+        return False
+    price_value = row.get("Son Fiyat", row.get("close"))
+    try:
+        suggested_amount = float(row.get("Önerilen Tutar", 0.0) or 0.0)
+    except Exception:
+        suggested_amount = 0.0
+    cart.append({
+        "Sembol": symbol,
+        "Aksiyon": str(row.get("Aksiyon", "Yeni pozisyon")),
+        "Mesaj": str(row.get("Mesaj", "")),
+        "Atlas Skoru": float(row.get("Atlas Skoru", 0) or 0),
+        "Risk/Getiri": row.get("Risk/Getiri", row.get("rr_ratio")),
+        "Son Fiyat": float(price_value) if price_value not in [None, "", np.nan] else None,
+        "Stop": row.get("Stop", row.get("stop_loss")),
+        "Hedef": row.get("Hedef", row.get("take_profit")),
+        "Önerilen Tutar": suggested_amount,
+        "Kaynak": "ATLAS TRADE",
+        "Not": f"{row.get('Aksiyon', 'Atlas fırsatı')} · Skor %{row.get('Atlas Skoru', 0)}",
+        "Portföy Payı": "%15",
+    })
+    st.session_state["radar_cart"] = cart
+    return True
+
+
+def remove_from_radar_cart(symbol: str) -> None:
+    st.session_state["radar_cart"] = [item for item in get_radar_cart() if str(item.get("Sembol", "")).upper() != str(symbol).upper()]
+
+
+
 def render_portfolio_overview(open_rows: List[Dict[str, Any]], snapshot: Dict[str, float]) -> None:
     risk = "DÜŞÜK" if len(open_rows) <= 2 else "ORTA" if len(open_rows) <= 4 else "YÜKSEK"
     risk_color = "#10B981" if risk == "DÜŞÜK" else "#F59E0B" if risk == "ORTA" else "#EF4444"
@@ -1236,6 +1280,7 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
 
     radar = build_radar(profile_name, "1G", 10)
     open_map = {row["Sembol"]: row for row in rows}
+    cart_symbols = get_radar_cart_symbols() if STREAMLIT_AVAILABLE else set()
     yeni_firsatlar: List[Dict[str, Any]] = []
     artirilabilirler: List[Dict[str, Any]] = []
 
@@ -1505,6 +1550,8 @@ def render_position_form(default_symbol: str) -> None:
         st.session_state["portfolio_prefill_note"] = "Midas işlemi"
     if "portfolio_prefill_entry" not in st.session_state:
         st.session_state["portfolio_prefill_entry"] = get_prefill_entry_price(st.session_state["portfolio_prefill_symbol"])
+    if "portfolio_prefill_qty" not in st.session_state:
+        st.session_state["portfolio_prefill_qty"] = 1.0
 
     default_idx = SEARCHABLE_ASSETS.index(st.session_state["portfolio_prefill_symbol"]) if st.session_state["portfolio_prefill_symbol"] in SEARCHABLE_ASSETS else 0
     open_rows, invested_now = build_open_positions()
@@ -1525,7 +1572,7 @@ def render_position_form(default_symbol: str) -> None:
                 prefill_entry = round(float(latest_for_symbol), 4)
             entry = st.number_input("Alış Fiyatı", min_value=0.0, value=float(prefill_entry), step=0.01)
         with c4:
-            qty = st.number_input("Adet", min_value=0.0001, value=1.0, step=0.1)
+            qty = st.number_input("Adet", min_value=0.0001, value=float(st.session_state.get("portfolio_prefill_qty", 1.0) or 1.0), step=0.1)
         c5, c6 = st.columns([1, 1])
         with c5:
             source_options = ["KULLANICI", "ATLAS TRADE"]
@@ -1558,6 +1605,7 @@ def render_position_form(default_symbol: str) -> None:
                 st.session_state["portfolio_prefill_source"] = source
                 st.session_state["portfolio_prefill_note"] = note
                 st.session_state["portfolio_prefill_entry"] = entry
+                st.session_state["portfolio_prefill_qty"] = qty
                 st.success(f"{symbol} portföye eklendi.")
                 st.rerun()
             else:
@@ -1571,6 +1619,7 @@ def render_position_form(default_symbol: str) -> None:
             st.session_state["portfolio_prefill_source"] = "KULLANICI"
             st.session_state["portfolio_prefill_note"] = "Midas işlemi"
             st.session_state["portfolio_prefill_entry"] = get_prefill_entry_price(default_symbol)
+            st.session_state["portfolio_prefill_qty"] = 1.0
             st.rerun()
     with c2:
         st.caption("Atlas fırsatlarından gelen semboller burada otomatik açılır.")
@@ -1765,6 +1814,8 @@ def get_radar_sections(rows: List[Dict[str, Any]], cash: float, riskable: float,
     if not radar.empty:
         for _, item in radar.iterrows():
             sembol = str(item["Sembol"])
+            if sembol in cart_symbols:
+                continue
             row = item.to_dict()
             skor = float(row.get("Atlas Skoru", 0) or 0)
             if sembol not in open_map:
@@ -1890,16 +1941,11 @@ def render_opportunity_card(row: Dict[str, Any], key_prefix: str, compact: bool 
         if action == "Kar alma":
             st.button(f"{row['Sembol']} izlemeye devam et", key=f"watch_{key_prefix}_{row['Sembol']}", use_container_width=True)
         else:
-            if st.button(f"{row['Sembol']} yeni işleme aktar", key=f"push_{key_prefix}_{row['Sembol']}", use_container_width=True):
-                push_prefill_to_new_trade(
-                    str(row["Sembol"]),
-                    "%15",
-                    "ATLAS TRADE",
-                    f"{row['Aksiyon']} · Skor %{row['Atlas Skoru']}",
-                    entry_price=float(price_value) if price_value not in [None, "", np.nan] else None,
-                )
-                st.session_state["active_page"] = "➕ Yeni İşlem"
-                st.success(f"{row['Sembol']} yeni işleme aktarıldı.")
+            if st.button(f"{row['Sembol']} sepete ekle", key=f"push_{key_prefix}_{row['Sembol']}", use_container_width=True):
+                if add_to_radar_cart(row):
+                    st.success(f"{row['Sembol']} sepete eklendi.")
+                else:
+                    st.info(f"{row['Sembol']} zaten sepette.")
                 st.rerun()
 
 
@@ -1921,6 +1967,62 @@ def render_today_atlas_found(radar_sections: Dict[str, Any]) -> None:
         if shown >= 4:
             break
     st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_cart_page(snapshot: Dict[str, float]) -> None:
+    cart = get_radar_cart()
+    header_cols = st.columns([1.3, 1])
+    with header_cols[0]:
+        st.markdown('<div class="section-title">Radar Sepeti</div><div class="section-sub">Beğendiğin fırsatları burada topla. Alım tutarını ayarlayıp tek tek yeni işlem formuna gönderebilirsin.</div>', unsafe_allow_html=True)
+    with header_cols[1]:
+        st.metric("Sepetteki fırsat", f"{len(cart)} adet")
+    if not cart:
+        st.info("Sepetin şu an boş. Radar ekranından veya ana sayfadaki fırsat kartlarından sepete ekleme yapabilirsin.")
+        return
+
+    if st.button("Sepeti temizle", use_container_width=True, key="clear_radar_cart"):
+        st.session_state["radar_cart"] = []
+        st.rerun()
+
+    for idx, item in enumerate(cart):
+        symbol = str(item.get("Sembol", "-"))
+        last_price = item.get("Son Fiyat")
+        rr_text = item.get("Risk/Getiri") if item.get("Risk/Getiri") not in [None, ""] else "-"
+        score_text = f"%{round(float(item.get('Atlas Skoru', 0) or 0), 1)}"
+        price_text = format_price(last_price) if last_price not in [None, "", np.nan] else "-"
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='idea-head'><div><div class='idea-symbol'>{symbol}</div><div class='idea-subline'>{item.get('Aksiyon', 'Yeni pozisyon')} · Atlas skoru {score_text}</div></div><div class='status-pill'>Sepette</div></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div style='display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;'><div class='price-chip'>Son fiyat: {price_text}</div><div class='price-chip'>Risk/Getiri: {rr_text}</div></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<div class='idea-message'>{item.get('Mesaj', '')}</div>", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns([1, 1, 1])
+        with c1:
+            default_amount = float(item.get("Önerilen Tutar", 0.0) or 0.0)
+            amount = st.number_input("Alım tutarı", min_value=0.0, value=float(default_amount), step=10.0, key=f"cart_amount_{symbol}_{idx}")
+        with c2:
+            est_qty = 0.0 if last_price in [None, 0, "", np.nan] or amount <= 0 else round(float(amount) / max(float(last_price), 1e-9), 4)
+            qty = st.number_input("Tahmini adet", min_value=0.0, value=float(est_qty), step=0.0001, key=f"cart_qty_{symbol}_{idx}")
+        with c3:
+            weight = st.selectbox("Portföy payı", ["%10", "%15", "%20", "%25", "%30", "%35"], index=1, key=f"cart_weight_{symbol}_{idx}")
+        b1, b2 = st.columns([1.15, 0.85])
+        with b1:
+            if st.button(f"{symbol} için formu aç", use_container_width=True, key=f"open_cart_{symbol}_{idx}"):
+                push_prefill_to_new_trade(symbol, weight, "ATLAS TRADE", str(item.get("Not", "Atlas fırsatı")), entry_price=float(last_price) if last_price not in [None, "", np.nan] else None)
+                st.session_state["portfolio_prefill_qty"] = float(qty)
+                remove_from_radar_cart(symbol)
+                st.session_state["active_page"] = "➕ Yeni İşlem"
+                st.rerun()
+        with b2:
+            if st.button(f"{symbol} çıkar", use_container_width=True, key=f"remove_cart_{symbol}_{idx}"):
+                remove_from_radar_cart(symbol)
+                st.rerun()
+        st.caption("Sepette alım tutarını ayarlayabilirsin. Form açıldığında alış fiyatı son görülen rakamla gelir, istersen Midas fiyatına göre revize edersin.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_dashboard_page(profile_name: str, open_rows: List[Dict[str, Any]], snapshot: Dict[str, float]) -> None:
@@ -2010,7 +2112,7 @@ def render_radar_page(profile_name: str, open_rows: List[Dict[str, Any]], snapsh
 def render_sidebar_navigation() -> str:
     if "active_page" not in st.session_state:
         st.session_state["active_page"] = "🏠 Dashboard"
-    pages = ["🏠 Dashboard", "👜 Portföy", "🔎 Radar", "➕ Yeni İşlem", "🗃️ Geçmiş"]
+    pages = ["🏠 Dashboard", "👜 Portföy", "🔎 Radar", "🛒 Sepet", "➕ Yeni İşlem", "🗃️ Geçmiş"]
     current = st.session_state["active_page"] if st.session_state.get("active_page") in pages else pages[0]
     page = st.sidebar.radio("Sayfalar", pages, index=pages.index(current))
     st.session_state["active_page"] = page
@@ -2043,6 +2145,8 @@ def main_streamlit() -> None:
         render_cashflow_calendar(open_rows)
     elif page == "🔎 Radar":
         render_radar_page(profile_name, open_rows, snapshot)
+    elif page == "🛒 Sepet":
+        render_cart_page(snapshot)
     elif page == "➕ Yeni İşlem":
         render_add_position(DEFAULT_SYMBOLS[0])
     else:
