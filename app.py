@@ -824,29 +824,133 @@ def inject_css() -> None:
         """
         <style>
         html, body, [class*="css"] { font-family: Inter, system-ui, sans-serif; }
-        .stApp { background: linear-gradient(180deg, #0B1220 0%, #111827 100%); color:#E5E7EB; }
-        .block-container { max-width: 1320px; padding-top: 1rem; padding-bottom: 2rem; }
-        section[data-testid="stSidebar"] { background: #0B1220; border-right: 1px solid rgba(148,163,184,0.12); }
-        .topbar { display:flex; justify-content:space-between; align-items:center; padding:16px 18px; border-radius:20px; background:#111827; border:1px solid rgba(148,163,184,0.10); margin-bottom:16px; }
-        .brand-title { font-size:1.45rem; font-weight:800; color:#F8FAFC; }
-        .brand-sub { color:#94A3B8; font-size:0.92rem; margin-top:4px; }
-        .card { background:#111827; border:1px solid rgba(148,163,184,0.10); border-radius:20px; padding:18px; margin-bottom:16px; }
-        .section-title { color:#F8FAFC; font-size:1.02rem; font-weight:800; margin-bottom:8px; }
-        .section-sub { color:#94A3B8; font-size:0.9rem; margin-bottom:12px; }
+        .stApp {
+            background:
+                radial-gradient(circle at top left, rgba(37,99,235,0.16), transparent 26%),
+                radial-gradient(circle at top right, rgba(14,165,233,0.12), transparent 22%),
+                linear-gradient(180deg, #081121 0%, #0B1220 45%, #0F172A 100%);
+            color:#E5E7EB;
+        }
+        .block-container { max-width: 1380px; padding-top: 1.1rem; padding-bottom: 2.4rem; }
+        section[data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #0A1426 0%, #0C1628 100%);
+            border-right: 1px solid rgba(148,163,184,0.12);
+        }
+        .topbar {
+            display:flex; justify-content:space-between; align-items:flex-start; gap:20px;
+            padding:22px 24px; border-radius:24px;
+            background: linear-gradient(135deg, rgba(15,23,42,0.96) 0%, rgba(10,20,38,0.90) 100%);
+            border:1px solid rgba(148,163,184,0.14);
+            box-shadow: 0 18px 50px rgba(0,0,0,0.28);
+            margin-bottom:18px;
+        }
+        .brand-title { font-size:1.6rem; font-weight:800; color:#F8FAFC; letter-spacing:-0.02em; }
+        .brand-sub { color:#A5B4FC; font-size:0.96rem; margin-top:6px; font-weight:600; }
+        .brand-copy { color:#94A3B8; font-size:0.94rem; max-width:440px; line-height:1.55; }
+        .brand-badge-wrap { display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+        .hero-badge {
+            display:inline-flex; align-items:center; gap:8px;
+            padding:10px 12px; border-radius:14px;
+            background: rgba(15,23,42,0.72);
+            border:1px solid rgba(148,163,184,0.14);
+            color:#E2E8F0; font-size:0.84rem; font-weight:700;
+        }
+        .card {
+            background: linear-gradient(180deg, rgba(11,23,42,0.92) 0%, rgba(15,23,42,0.84) 100%);
+            border:1px solid rgba(148,163,184,0.12);
+            border-radius:24px; padding:20px; margin-bottom:16px;
+            box-shadow: 0 18px 40px rgba(0,0,0,0.18);
+        }
+        .hero-panel {
+            background: linear-gradient(135deg, rgba(20,31,56,0.98) 0%, rgba(13,24,42,0.94) 100%);
+            border:1px solid rgba(96,165,250,0.18);
+        }
+        .section-title { color:#F8FAFC; font-size:1.08rem; font-weight:800; margin-bottom:8px; letter-spacing:-0.01em; }
+        .section-sub { color:#94A3B8; font-size:0.92rem; margin-bottom:14px; line-height:1.5; }
         .metric-grid { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:12px; }
-        .metric-card { background:#0F172A; border:1px solid rgba(148,163,184,0.10); border-radius:16px; padding:14px; }
-        .metric-label { color:#94A3B8; font-size:0.76rem; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:5px; }
-        .metric-value { color:#F8FAFC; font-size:1.15rem; font-weight:800; }
-        .risk-chip { display:inline-block; padding:6px 10px; border-radius:999px; font-size:0.78rem; font-weight:700; }
-        .alert-item { display:flex; gap:10px; padding:12px 14px; border-radius:16px; background:#0F172A; border:1px solid rgba(148,163,184,0.08); margin-bottom:10px; }
-        .alert-dot { width:10px; height:10px; border-radius:999px; margin-top:6px; }
-        .radar-card { background:#0F172A; border:1px solid rgba(148,163,184,0.08); border-radius:18px; padding:16px; margin-bottom:10px; }
-        .radar-title { color:#F8FAFC; font-size:1rem; font-weight:800; }
-        .radar-meta { color:#94A3B8; font-size:0.85rem; margin-top:4px; }
-        .flow-step { color:#CBD5E1; font-size:0.92rem; margin-bottom:12px; }
-        .flow-arrow { text-align:center; font-size:1.2rem; color:#94A3B8; margin:8px 0; }
-        .flow-step { color:#E2E8F0; font-size:0.95rem; font-weight:700; padding:10px 12px; border-radius:14px; background:#0F172A; border:1px solid rgba(148,163,184,0.08); margin:8px 0; text-align:center; }
-        .flow-arrow { text-align:center; color:#64748B; font-size:1.2rem; margin:2px 0; }
+        .metric-card {
+            background: linear-gradient(180deg, rgba(15,23,42,0.96) 0%, rgba(15,23,42,0.84) 100%);
+            border:1px solid rgba(148,163,184,0.11); border-radius:18px; padding:16px;
+            min-height:104px; position:relative; overflow:hidden;
+        }
+        .metric-card::before {
+            content:""; position:absolute; inset:0 auto auto 0; width:100%; height:3px;
+            background: linear-gradient(90deg, rgba(96,165,250,0.95) 0%, rgba(56,189,248,0.30) 100%);
+        }
+        .metric-label { color:#94A3B8; font-size:0.76rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px; }
+        .metric-value { color:#F8FAFC; font-size:1.26rem; font-weight:800; letter-spacing:-0.02em; }
+        .metric-note { color:#64748B; font-size:0.82rem; margin-top:7px; line-height:1.45; }
+        .mini-kpi-grid { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:10px; margin-top:12px; }
+        .mini-kpi {
+            padding:12px 14px; border-radius:16px; background: rgba(8,17,33,0.62);
+            border:1px solid rgba(148,163,184,0.10);
+        }
+        .mini-kpi-label { color:#94A3B8; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; }
+        .mini-kpi-value { color:#F8FAFC; font-size:1.0rem; font-weight:800; margin-top:4px; }
+        .dashboard-dual { display:grid; grid-template-columns: 1.35fr 0.85fr; gap:16px; }
+        .idea-card {
+            background: linear-gradient(180deg, rgba(10,19,35,0.94) 0%, rgba(13,22,39,0.90) 100%);
+            border:1px solid rgba(148,163,184,0.10);
+            border-left-width:4px;
+            border-radius:20px; padding:16px 16px 14px; margin-bottom:12px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+        }
+        .idea-new { border-left-color:#38BDF8; }
+        .idea-add { border-left-color:#22C55E; }
+        .idea-take { border-left-color:#F59E0B; }
+        .idea-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
+        .idea-symbol { color:#F8FAFC; font-size:1.04rem; font-weight:800; }
+        .idea-subline { color:#94A3B8; font-size:0.84rem; margin-top:4px; }
+        .price-chip {
+            display:inline-flex; align-items:center; gap:6px; padding:8px 10px; border-radius:14px;
+            background: rgba(15,23,42,0.86); border:1px solid rgba(148,163,184,0.12);
+            color:#E2E8F0; font-size:0.86rem; font-weight:800;
+        }
+        .status-pill {
+            display:inline-flex; align-items:center; gap:6px; padding:8px 11px; border-radius:999px;
+            background: rgba(255,255,255,0.04); border:1px solid rgba(148,163,184,0.12);
+            color:#E2E8F0; font-size:0.80rem; font-weight:700;
+        }
+        .idea-message { color:#CBD5E1; margin-top:12px; line-height:1.6; font-size:0.95rem; }
+        .idea-stats { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px; }
+        .idea-stat {
+            background: rgba(8,17,33,0.54); border:1px solid rgba(148,163,184,0.08);
+            border-radius:14px; padding:10px 12px;
+        }
+        .idea-stat-label { color:#94A3B8; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; }
+        .idea-stat-value { color:#F8FAFC; font-size:0.94rem; font-weight:800; margin-top:4px; }
+        .list-shell {
+            background: rgba(8,17,33,0.48); border:1px solid rgba(148,163,184,0.08);
+            border-radius:18px; padding:14px 16px; margin-top:10px;
+        }
+        .list-row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid rgba(148,163,184,0.08); }
+        .list-row:last-child { border-bottom:none; padding-bottom:0; }
+        .list-left { color:#E2E8F0; font-size:0.92rem; font-weight:700; }
+        .list-right { color:#94A3B8; font-size:0.86rem; }
+        .flow-step {
+            color:#E2E8F0; font-size:0.96rem; font-weight:700; padding:11px 14px;
+            border-radius:16px; background:rgba(8,17,33,0.62); border:1px solid rgba(148,163,184,0.08); margin:8px 0; text-align:center;
+        }
+        .flow-arrow { text-align:center; color:#64748B; font-size:1.25rem; margin:2px 0; }
+        div[data-testid="stButton"] > button {
+            border-radius:14px; min-height:44px; font-weight:700; border:1px solid rgba(148,163,184,0.16);
+            background: linear-gradient(180deg, rgba(15,23,42,0.96) 0%, rgba(17,24,39,0.88) 100%);
+            color:#F8FAFC;
+        }
+        div[data-testid="stButton"] > button:hover {
+            border-color: rgba(96,165,250,0.34);
+            color:#FFFFFF;
+            box-shadow: 0 0 0 1px rgba(96,165,250,0.12) inset;
+        }
+        @media (max-width: 1100px) {
+            .metric-grid, .dashboard-dual { grid-template-columns: repeat(2,minmax(0,1fr)); }
+            .idea-stats, .mini-kpi-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 760px) {
+            .metric-grid, .dashboard-dual { grid-template-columns: 1fr; }
+            .topbar { flex-direction:column; }
+            .brand-badge-wrap { justify-content:flex-start; }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -860,8 +964,13 @@ def render_topbar() -> None:
             <div>
                 <div class="brand-title">{APP_TITLE}</div>
                 <div class="brand-sub">{APP_SUBTITLE}</div>
+                <div class="brand-copy">Dolar bazlı portföyünü sade, güven veren ve takip etmesi kolay şekilde yönet. Atlas bugün dikkat edilmesi gereken alanları senin adına süzüp önüne getirir.</div>
             </div>
-            <div style="color:#94A3B8;font-size:0.9rem;">Dolar bazlı portföyünü sade, güven veren ve takip etmesi kolay şekilde yönet.</div>
+            <div class="brand-badge-wrap">
+                <div class="hero-badge">📌 Sade Türkçe anlatım</div>
+                <div class="hero-badge">🧭 Portföy odaklı radar</div>
+                <div class="hero-badge">💵 USD / TL görünümü</div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1729,35 +1838,84 @@ def render_dashboard_chart_allocation(open_rows: List[Dict[str, Any]], snapshot:
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+def render_opportunity_card(row: Dict[str, Any], key_prefix: str, compact: bool = False) -> None:
+    action = str(row.get("Aksiyon", "İzlenebilir fırsat"))
+    action_class = "idea-new"
+    if action == "Ekleme fırsatı":
+        action_class = "idea-add"
+    elif action == "Kar alma":
+        action_class = "idea-take"
+
+    price_value = row.get("Fiyat")
+    price_text = format_price(float(price_value), is_money=False) if price_value not in [None, "", np.nan] else "-"
+    rr_value = row.get("Risk/Getiri")
+    rr_text = "-" if rr_value in [None, "", np.nan] else format_number(float(rr_value))
+    score_text = f"%{round(float(row.get('Atlas Skoru', 0) or 0), 1)}"
+    stop_text = format_price(row.get("Stop"), is_money=False) if row.get("Stop") not in [None, ""] else "-"
+    target_text = format_price(row.get("Hedef"), is_money=False) if row.get("Hedef") not in [None, ""] else "-"
+
+    st.markdown(
+        f"""
+        <div class="idea-card {action_class}">
+            <div class="idea-head">
+                <div>
+                    <div class="idea-symbol">{row['Sembol']}</div>
+                    <div class="idea-subline">{action} · Atlas skoru {score_text}</div>
+                </div>
+                <div class="status-pill">{action}</div>
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+                <div class="price-chip">Son fiyat: {price_text}</div>
+                <div class="price-chip">Risk/Getiri: {rr_text}</div>
+            </div>
+            <div class="idea-message">{row['Mesaj']}</div>
+            <div class="idea-stats">
+                <div class="idea-stat"><div class="idea-stat-label">Stop</div><div class="idea-stat-value">{stop_text}</div></div>
+                <div class="idea-stat"><div class="idea-stat-label">Hedef</div><div class="idea-stat-value">{target_text}</div></div>
+                <div class="idea-stat"><div class="idea-stat-label">Durum</div><div class="idea-stat-value">{row['Aksiyon']}</div></div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    cols = st.columns([0.95, 1.05]) if compact else st.columns([0.9, 1.1])
+    with cols[0]:
+        if action == "Kar alma":
+            st.caption(f"Açık getiri: {row.get('PnL %', '-')}")
+        else:
+            onerilen = float(row.get("Önerilen Tutar", 0.0) or 0.0)
+            st.caption(f"Önerilen tutar: {format_price(onerilen)}")
+    with cols[1]:
+        if action == "Kar alma":
+            st.button(f"{row['Sembol']} izlemeye devam et", key=f"watch_{key_prefix}_{row['Sembol']}", use_container_width=True)
+        else:
+            if st.button(f"{row['Sembol']} yeni işleme aktar", key=f"push_{key_prefix}_{row['Sembol']}", use_container_width=True):
+                push_prefill_to_new_trade(
+                    str(row["Sembol"]),
+                    "%15",
+                    "ATLAS TRADE",
+                    f"{row['Aksiyon']} · Skor %{row['Atlas Skoru']}",
+                    entry_price=float(price_value) if price_value not in [None, "", np.nan] else None,
+                )
+                st.session_state["active_page"] = "➕ Yeni İşlem"
+                st.success(f"{row['Sembol']} yeni işleme aktarıldı.")
+                st.rerun()
+
+
 def render_today_atlas_found(radar_sections: Dict[str, Any]) -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Bugün Atlas Ne Buldu?</div><div class="section-sub">Sakin ve seçici radar mantığıyla öne çıkan fırsatlar.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Bugün Atlas Ne Buldu?</div><div class="section-sub">Sakin ve seçici radar mantığıyla öne çıkan fırsatlar. Gereksiz işlem değil, anlamlı aksiyon üretmek için süzüldü.</div>', unsafe_allow_html=True)
     if radar_sections["toplam"] == 0:
         st.info("Bugün izlenebilir bir fırsat görünmüyor. Bu da Atlas için normal ve sağlıklı bir sonuç.")
         st.markdown('</div>', unsafe_allow_html=True)
         return
 
     shown = 0
-    for group_name, items in [("Ekleme", radar_sections["ekleme"]), ("Yeni", radar_sections["yeni"]), ("Kar Al", radar_sections["kar_al"] )]:
+    for group_name, items in [("Ekleme", radar_sections["ekleme"]), ("Yeni", radar_sections["yeni"]), ("Kar Al", radar_sections["kar_al"])]:
         for i, row in enumerate(items[:2]):
+            render_opportunity_card(row, key_prefix=f"dash_{group_name}_{i}", compact=True)
             shown += 1
-            st.markdown(
-                f"<div class='radar-card'><div class='radar-title'>{row['Sembol']} · {row['Aksiyon']}</div><div class='radar-meta'>Atlas Skoru: %{row['Atlas Skoru']} · Risk/Getiri: {row['Risk/Getiri']}</div><div style='color:#CBD5E1;margin-top:8px;'>{row['Mesaj']}</div></div>",
-                unsafe_allow_html=True,
-            )
-            c1, c2 = st.columns([1, 1])
-            with c1:
-                if row["Aksiyon"] == "Kar alma":
-                    st.caption(f"Açık getiri: {row.get('PnL %', '-')}")
-                else:
-                    onerilen = row.get("Önerilen Tutar", 0.0)
-                    st.caption(f"Önerilen tutar: {format_price(float(onerilen))}")
-            with c2:
-                if st.button(f"{row['Sembol']} yeni işleme aktar", key=f"dash_push_{group_name}_{row['Sembol']}_{i}", use_container_width=True):
-                    push_prefill_to_new_trade(str(row["Sembol"]), "%15", "ATLAS TRADE", f"{row['Aksiyon']} · Skor %{row['Atlas Skoru']}")
-                    st.session_state["active_page"] = "➕ Yeni İşlem"
-                    st.success(f"{row['Sembol']} yeni işleme aktarıldı.")
-                    st.rerun()
             if shown >= 4:
                 break
         if shown >= 4:
@@ -1767,48 +1925,65 @@ def render_today_atlas_found(radar_sections: Dict[str, Any]) -> None:
 
 def render_dashboard_page(profile_name: str, open_rows: List[Dict[str, Any]], snapshot: Dict[str, float]) -> None:
     radar_sections = get_radar_sections(open_rows, snapshot["cash"], snapshot["riskable"], profile_name)
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Atlas Gösterge Paneli</div><div class="section-sub">Dolar bazlı portföyünü tek bakışta takip et. Atlas bugün ne buldu, aşağıda gör.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="card hero-panel">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Gösterge Paneli</div><div class="section-sub">Portföyünü, nakit alanını ve bugünkü radar özetini tek bakışta gör. Bu ekran artık daha tok ve daha ürün hissi veren bir yapı için yoğunlaştırıldı.</div>', unsafe_allow_html=True)
     st.markdown(
         f"""
         <div class="metric-grid">
-            <div class="metric-card"><div class="metric-label">Toplam Varlık</div><div class="metric-value">{format_price(snapshot['current_equity'])}</div></div>
-            <div class="metric-card"><div class="metric-label">Net Sermaye</div><div class="metric-value">{format_price(snapshot['net_capital'])}</div></div>
-            <div class="metric-card"><div class="metric-label">Sistem Getirisi</div><div class="metric-value">%{round(float(snapshot['total_return_pct']), 2)}</div></div>
-            <div class="metric-card"><div class="metric-label">Bugünkü Radar</div><div class="metric-value">{radar_sections['toplam']} fırsat</div></div>
+            <div class="metric-card"><div class="metric-label">Toplam Varlık</div><div class="metric-value">{format_price(snapshot['current_equity'])}</div><div class="metric-note">Portföy ve nakdin toplam görünümü</div></div>
+            <div class="metric-card"><div class="metric-label">Net Sermaye</div><div class="metric-value">{format_price(snapshot['net_capital'])}</div><div class="metric-note">Giriş ve çıkışlar sonrası gerçek baz</div></div>
+            <div class="metric-card"><div class="metric-label">Sistem Getirisi</div><div class="metric-value">%{round(float(snapshot['total_return_pct']), 2)}</div><div class="metric-note">Portföy performansının sade özeti</div></div>
+            <div class="metric-card"><div class="metric-label">Bugünkü Radar</div><div class="metric-value">{radar_sections['toplam']} fırsat</div><div class="metric-note">Seçici filtre sonrası kalan liste</div></div>
         </div>
-        <div class="metric-grid" style="margin-top:12px;">
-            <div class="metric-card"><div class="metric-label">Nakit</div><div class="metric-value">{format_price(snapshot['cash'])}</div></div>
-            <div class="metric-card"><div class="metric-label">Açık K/Z</div><div class="metric-value">{format_price(snapshot['unrealized_pnl'])}</div></div>
-            <div class="metric-card"><div class="metric-label">Net Temettü</div><div class="metric-value">{format_price(snapshot['dividend_income'])}</div></div>
-            <div class="metric-card"><div class="metric-label">Tahmini Vergi Etkisi</div><div class="metric-value">{format_try(snapshot['estimated_tax_try'])}</div></div>
+        <div class="mini-kpi-grid">
+            <div class="mini-kpi"><div class="mini-kpi-label">Nakit</div><div class="mini-kpi-value">{format_price(snapshot['cash'])}</div></div>
+            <div class="mini-kpi"><div class="mini-kpi-label">Açık K/Z</div><div class="mini-kpi-value">{format_price(snapshot['unrealized_pnl'])}</div></div>
+            <div class="mini-kpi"><div class="mini-kpi-label">Net Temettü</div><div class="mini-kpi-value">{format_price(snapshot['dividend_income'])}</div></div>
         </div>
         """,
         unsafe_allow_html=True,
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
-    left, right = st.columns([1.2, 0.8])
+    left, right = st.columns([1.15, 0.85])
     with left:
         render_dashboard_chart_equity(snapshot)
     with right:
         render_dashboard_chart_allocation(open_rows, snapshot)
 
-    render_today_atlas_found(radar_sections)
+    extra_left, extra_right = st.columns([1.05, 0.95])
+    with extra_left:
+        render_today_atlas_found(radar_sections)
+    with extra_right:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Bugünkü Kısa Özet</div><div class="section-sub">Atlas bugün neye dikkat ediyor, tek kutuda gör.</div>', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="list-shell">
+                <div class="list-row"><div class="list-left">Aktif profil</div><div class="list-right">{profile_name}</div></div>
+                <div class="list-row"><div class="list-left">Ekleme fırsatı</div><div class="list-right">{len(radar_sections['ekleme'])} adet</div></div>
+                <div class="list-row"><div class="list-left">Yeni pozisyon</div><div class="list-right">{len(radar_sections['yeni'])} adet</div></div>
+                <div class="list-row"><div class="list-left">Kar alma</div><div class="list-right">{len(radar_sections['kar_al'])} adet</div></div>
+                <div class="list-row"><div class="list-left">Tahmini vergi etkisi</div><div class="list-right">{format_try(snapshot['estimated_tax_try'])}</div></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_radar_page(profile_name: str, open_rows: List[Dict[str, Any]], snapshot: Dict[str, float]) -> None:
     radar_sections = get_radar_sections(open_rows, snapshot["cash"], snapshot["riskable"], profile_name)
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Atlas Fırsat Radarı</div><div class="section-sub">Atlas bugün tüm evrende seçici bir tarama yaptı. Yalın dilde öne çıkanları burada görürsün.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="card hero-panel">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Fırsat Radarı</div><div class="section-sub">Atlas bugün tüm evrende seçici bir tarama yaptı. Sade Türkçe ile, gerçekten bakmaya değer olanları öne çıkarır.</div>', unsafe_allow_html=True)
     total_scanned = len(RISKY_UNIVERSE)
     st.markdown(
         f"""
         <div class="metric-grid">
-            <div class="metric-card"><div class="metric-label">Taranan Varlık</div><div class="metric-value">{total_scanned}</div></div>
-            <div class="metric-card"><div class="metric-label">İzlenebilir Fırsat</div><div class="metric-value">{len(radar_sections['yeni'])}</div></div>
-            <div class="metric-card"><div class="metric-label">Ekleme Fırsatı</div><div class="metric-value">{len(radar_sections['ekleme'])}</div></div>
-            <div class="metric-card"><div class="metric-label">Kar Alma</div><div class="metric-value">{len(radar_sections['kar_al'])}</div></div>
+            <div class="metric-card"><div class="metric-label">Taranan Varlık</div><div class="metric-value">{total_scanned}</div><div class="metric-note">Hisse ve ETF evreni</div></div>
+            <div class="metric-card"><div class="metric-label">İzlenebilir Fırsat</div><div class="metric-value">{len(radar_sections['yeni'])}</div><div class="metric-note">Portföyde olmayan adaylar</div></div>
+            <div class="metric-card"><div class="metric-label">Ekleme Fırsatı</div><div class="metric-value">{len(radar_sections['ekleme'])}</div><div class="metric-note">Portföyde olup güçlenenler</div></div>
+            <div class="metric-card"><div class="metric-label">Kar Alma</div><div class="metric-value">{len(radar_sections['kar_al'])}</div><div class="metric-note">Getirisi olgunlaşanlar</div></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1828,25 +2003,7 @@ def render_radar_page(profile_name: str, open_rows: List[Dict[str, Any]], snapsh
             st.markdown('</div>', unsafe_allow_html=True)
             continue
         for i, row in enumerate(items[:6]):
-            st.markdown(
-                f"<div class='radar-card'><div class='radar-title'>{row['Sembol']} · {row['Aksiyon']}</div><div class='radar-meta'>Atlas Skoru: %{row['Atlas Skoru']} · Risk/Getiri: {row['Risk/Getiri']} · Stop: {format_price(row['Stop'])} · Hedef: {format_price(row['Hedef'])}</div><div style='color:#CBD5E1;margin-top:8px;'>{row['Mesaj']}</div></div>",
-                unsafe_allow_html=True,
-            )
-            c1, c2 = st.columns([1, 1])
-            with c1:
-                if row["Aksiyon"] != "Kar alma":
-                    st.caption(f"Önerilen tutar: {format_price(float(row.get('Önerilen Tutar', 0.0)))}")
-                else:
-                    st.caption(f"Açık getiri: {row.get('PnL %', '-')}")
-            with c2:
-                if row["Aksiyon"] == "Kar alma":
-                    st.button(f"{row['Sembol']} izlemeye devam et", key=f"watch_{title}_{row['Sembol']}_{i}", use_container_width=True)
-                else:
-                    if st.button(f"{row['Sembol']} yeni işleme aktar", key=f"radar_push_{title}_{row['Sembol']}_{i}", use_container_width=True):
-                        push_prefill_to_new_trade(str(row["Sembol"]), "%15", "ATLAS TRADE", f"{row['Aksiyon']} · Skor %{row['Atlas Skoru']}")
-                        st.session_state["active_page"] = "➕ Yeni İşlem"
-                        st.success(f"{row['Sembol']} yeni işleme aktarıldı.")
-                        st.rerun()
+            render_opportunity_card(row, key_prefix=f"radar_{title}_{i}", compact=False)
         st.markdown('</div>', unsafe_allow_html=True)
 
 
