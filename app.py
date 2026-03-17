@@ -33,6 +33,9 @@ except ModuleNotFoundError:
 
 APP_TITLE = "Atlas Money"
 APP_SUBTITLE = "Basit Anlatan Yatırım Aracı"
+
+# Güvenli varsayılan: radar sepet filtresi tanımlı olsun
+cart_symbols = set()
 DB_PATH = "signals.db"
 INITIAL_CASH = 0.0
 
@@ -1280,7 +1283,7 @@ def render_action_center(rows: List[Dict[str, Any]], cash: float, riskable: floa
 
     radar = build_radar(profile_name, "1G", 10)
     open_map = {row["Sembol"]: row for row in rows}
-    cart_symbols = get_radar_cart_symbols() if STREAMLIT_AVAILABLE else set()
+    local_cart_symbols = get_radar_cart_symbols() if STREAMLIT_AVAILABLE else set()
     yeni_firsatlar: List[Dict[str, Any]] = []
     artirilabilirler: List[Dict[str, Any]] = []
 
@@ -1807,6 +1810,7 @@ def render_history_tab() -> None:
 def get_radar_sections(rows: List[Dict[str, Any]], cash: float, riskable: float, profile_name: str) -> Dict[str, Any]:
     radar = build_radar(profile_name, "1G", 12)
     open_map = {row["Sembol"]: row for row in rows}
+    cart_symbols = get_radar_cart_symbols() if STREAMLIT_AVAILABLE else set()
     yeni_firsatlar: List[Dict[str, Any]] = []
     artirilabilirler: List[Dict[str, Any]] = []
     kar_alinabilirler: List[Dict[str, Any]] = []
@@ -1814,7 +1818,7 @@ def get_radar_sections(rows: List[Dict[str, Any]], cash: float, riskable: float,
     if not radar.empty:
         for _, item in radar.iterrows():
             sembol = str(item["Sembol"])
-            if sembol in cart_symbols:
+            if sembol in local_cart_symbols:
                 continue
             row = item.to_dict()
             skor = float(row.get("Atlas Skoru", 0) or 0)
