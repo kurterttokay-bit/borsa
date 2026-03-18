@@ -2185,6 +2185,7 @@ def seed_midas_demo_portfolio(force: bool = False) -> bool:
     set_app_state("demo_seed_label", "Midas Demo · 18.03.2026")
     set_app_state("demo_initial_try", str(MIDAS_DEMO_INITIAL_TRY))
     set_app_state("demo_initial_usdtry", str(MIDAS_DEMO_USDTRY))
+    set_app_state("demo_seed_applied", "1")
     for item in MIDAS_DEMO_POSITIONS:
         add_portfolio_position(
             item["symbol"],
@@ -2200,6 +2201,11 @@ def seed_midas_demo_portfolio(force: bool = False) -> bool:
             created_at=MIDAS_DEMO_DATE,
         )
     return True
+
+
+def ensure_midas_demo_seeded() -> None:
+    if get_app_state("demo_seed_applied", "") != "1":
+        seed_midas_demo_portfolio(force=True)
 
 
 def get_weekly_budget_try() -> float:
