@@ -860,124 +860,102 @@ def inject_css() -> None:
         """
         <style>
         html, body, [class*="css"] { font-family: Inter, system-ui, sans-serif; }
-        .stApp {
-            background: #0B1220;
-            color:#E5E7EB;
-        }
-        .block-container { max-width: 1280px; padding-top: 0.9rem; padding-bottom: 2rem; }
+        .stApp { background:#0B1220; color:#E5E7EB; }
+        .block-container { max-width: 1220px; padding-top: 0.8rem; padding-bottom: 2.4rem; }
         section[data-testid="stSidebar"] {
-            background: #0F172A;
-            border-right: 1px solid rgba(148,163,184,0.10);
+            background:#0F172A;
+            border-right:1px solid rgba(148,163,184,0.10);
         }
         .topbar {
-            display:flex; justify-content:space-between; align-items:center; gap:16px;
-            padding:16px 18px; border-radius:18px;
-            background: #111827;
-            border:1px solid rgba(148,163,184,0.10);
-            margin-bottom:14px;
+            display:flex; justify-content:space-between; align-items:flex-start; gap:16px;
+            padding:14px 16px; border-radius:16px; margin-bottom:14px;
+            background:#111827; border:1px solid rgba(148,163,184,0.10);
         }
-        .brand-title { font-size:1.22rem; font-weight:800; color:#F8FAFC; letter-spacing:-0.02em; }
-        .brand-sub { color:#94A3B8; font-size:0.90rem; margin-top:4px; font-weight:500; }
-        .brand-copy { color:#94A3B8; font-size:0.90rem; max-width:520px; line-height:1.45; margin-top:6px; }
+        .brand-title { color:#F8FAFC; font-size:1.16rem; font-weight:800; letter-spacing:-0.02em; }
+        .brand-sub { color:#94A3B8; font-size:0.86rem; margin-top:3px; }
+        .brand-copy { color:#94A3B8; font-size:0.86rem; line-height:1.42; margin-top:6px; max-width:560px; }
         .brand-badge-wrap { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
         .hero-badge {
-            display:inline-flex; align-items:center; gap:6px;
-            padding:7px 10px; border-radius:999px;
-            background: #0B1220;
-            border:1px solid rgba(148,163,184,0.10);
-            color:#CBD5E1; font-size:0.78rem; font-weight:700;
+            display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px;
+            background:#0B1220; border:1px solid rgba(148,163,184,0.10); color:#CBD5E1;
+            font-size:0.76rem; font-weight:700;
         }
         .card {
-            background: #111827;
-            border:1px solid rgba(148,163,184,0.10);
-            border-radius:18px; padding:16px; margin-bottom:12px;
-            box-shadow:none;
+            background:#111827; border:1px solid rgba(148,163,184,0.10);
+            border-radius:16px; padding:16px; margin-bottom:12px;
         }
-        .hero-panel {
-            background: #111827;
-            border:1px solid rgba(148,163,184,0.10);
-        }
-        .section-title { color:#F8FAFC; font-size:1rem; font-weight:800; margin-bottom:6px; letter-spacing:-0.01em; }
-        .section-sub { color:#94A3B8; font-size:0.89rem; margin-bottom:12px; line-height:1.45; }
+        .hero-panel { padding:18px; }
+        .section-title { color:#F8FAFC; font-size:1rem; font-weight:800; margin-bottom:4px; letter-spacing:-0.01em; }
+        .section-sub { color:#94A3B8; font-size:0.86rem; line-height:1.45; margin-bottom:12px; }
         .metric-grid { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:10px; }
         .metric-card {
-            background: #0F172A;
-            border:1px solid rgba(148,163,184,0.08); border-radius:14px; padding:14px;
-            min-height:88px;
+            background:#0F172A; border:1px solid rgba(148,163,184,0.08); border-radius:14px;
+            padding:13px 14px; min-height:84px;
         }
-        .metric-card::before { display:none; }
-        .metric-label { color:#94A3B8; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; margin-bottom:8px; }
-        .metric-value { color:#F8FAFC; font-size:1.18rem; font-weight:800; letter-spacing:-0.02em; }
-        .metric-note { color:#64748B; font-size:0.80rem; margin-top:6px; line-height:1.4; }
+        .metric-label { color:#94A3B8; font-size:0.70rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+        .metric-value { color:#F8FAFC; font-size:1.14rem; font-weight:800; letter-spacing:-0.02em; }
+        .metric-note { color:#64748B; font-size:0.78rem; margin-top:6px; }
         .mini-kpi-grid { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:10px; margin-top:10px; }
-        .mini-kpi {
-            padding:12px 14px; border-radius:14px; background:#0F172A;
-            border:1px solid rgba(148,163,184,0.08);
-        }
-        .mini-kpi-label { color:#94A3B8; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; }
-        .mini-kpi-value { color:#F8FAFC; font-size:0.98rem; font-weight:800; margin-top:4px; }
-        .dashboard-dual { display:grid; grid-template-columns: 1.25fr 0.95fr; gap:12px; }
-        .idea-row {
-            background: transparent;
-            border-bottom:1px solid rgba(148,163,184,0.08);
-            padding:10px 0;
-        }
-        .idea-row:last-child { border-bottom:none; }
-        .idea-main { display:flex; justify-content:space-between; align-items:center; gap:12px; }
-        .idea-symbol { color:#F8FAFC; font-size:0.98rem; font-weight:800; }
-        .idea-subline { color:#94A3B8; font-size:0.82rem; margin-top:3px; }
-        .idea-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
-        .price-chip {
-            display:inline-flex; align-items:center; gap:6px; padding:6px 9px; border-radius:999px;
-            background: #0F172A; border:1px solid rgba(148,163,184,0.08);
-            color:#E2E8F0; font-size:0.80rem; font-weight:700;
-        }
-        .status-pill {
-            display:inline-flex; align-items:center; gap:6px; padding:6px 9px; border-radius:999px;
-            background: transparent; border:1px solid rgba(148,163,184,0.10);
-            color:#CBD5E1; font-size:0.78rem; font-weight:700;
-        }
-        .idea-message { color:#CBD5E1; margin-top:8px; line-height:1.5; font-size:0.90rem; }
-        .idea-detail-grid { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px; }
-        .idea-detail {
-            background:#0F172A; border:1px solid rgba(148,163,184,0.08);
-            border-radius:12px; padding:9px 10px;
-        }
-        .idea-detail-label { color:#94A3B8; font-size:0.70rem; text-transform:uppercase; letter-spacing:0.07em; }
-        .idea-detail-value { color:#F8FAFC; font-size:0.90rem; font-weight:800; margin-top:3px; }
-        .list-shell {
-            background: #0F172A; border:1px solid rgba(148,163,184,0.08);
-            border-radius:14px; padding:10px 14px; margin-top:10px;
-        }
-        .list-row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid rgba(148,163,184,0.08); }
-        .list-row:last-child { border-bottom:none; padding-bottom:0; }
+        .mini-kpi { background:#0F172A; border:1px solid rgba(148,163,184,0.08); border-radius:14px; padding:12px 14px; }
+        .mini-kpi-label { color:#94A3B8; font-size:0.70rem; text-transform:uppercase; letter-spacing:0.08em; }
+        .mini-kpi-value { color:#F8FAFC; font-size:0.96rem; font-weight:800; margin-top:5px; }
+        .dashboard-dual { display:grid; grid-template-columns: 1.2fr 0.8fr; gap:12px; }
+        .list-shell { background:#0F172A; border:1px solid rgba(148,163,184,0.08); border-radius:14px; padding:4px 14px; }
+        .list-row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid rgba(148,163,184,0.08); }
+        .list-row:last-child { border-bottom:none; }
         .list-left { color:#E2E8F0; font-size:0.90rem; font-weight:700; }
-        .list-right { color:#94A3B8; font-size:0.84rem; }
-        .flow-step {
-            color:#E2E8F0; font-size:0.92rem; font-weight:700; padding:10px 12px;
-            border-radius:14px; background:#0F172A; border:1px solid rgba(148,163,184,0.08); margin:8px 0; text-align:center;
+        .list-right { color:#94A3B8; font-size:0.84rem; text-align:right; }
+        .idea-row {
+            border-bottom:1px solid rgba(148,163,184,0.08);
+            padding:8px 0 10px 0;
         }
-        .flow-arrow { text-align:center; color:#64748B; font-size:1.1rem; margin:2px 0; }
+        .idea-row:last-child { border-bottom:none; padding-bottom:0; }
+        .idea-line {
+            display:grid; grid-template-columns: minmax(0,1.25fr) 0.75fr 0.9fr 0.85fr;
+            gap:12px; align-items:center;
+        }
+        .idea-line-compact {
+            display:grid; grid-template-columns: minmax(0,1.3fr) 0.8fr 0.9fr 0.8fr;
+            gap:12px; align-items:center;
+        }
+        .idea-symbol-wrap { min-width:0; }
+        .idea-symbol { color:#F8FAFC; font-size:0.95rem; font-weight:800; }
+        .idea-subline { color:#94A3B8; font-size:0.80rem; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .idea-col-label { color:#64748B; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px; }
+        .idea-col-value { color:#E2E8F0; font-size:0.90rem; font-weight:700; }
+        .idea-col-value.soft { color:#94A3B8; font-weight:600; }
+        .idea-message { color:#CBD5E1; font-size:0.88rem; line-height:1.5; margin-top:8px; }
+        .idea-detail-grid { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px; }
+        .idea-detail { background:#0F172A; border:1px solid rgba(148,163,184,0.08); border-radius:12px; padding:9px 10px; }
+        .idea-detail-label { color:#94A3B8; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.08em; }
+        .idea-detail-value { color:#F8FAFC; font-size:0.90rem; font-weight:800; margin-top:4px; }
+        .mix-wrap { display:flex; flex-direction:column; gap:10px; }
+        .mix-row { display:grid; grid-template-columns: 110px minmax(0,1fr) 62px; gap:10px; align-items:center; }
+        .mix-label { color:#E2E8F0; font-size:0.88rem; font-weight:700; }
+        .mix-bar { height:10px; background:#0F172A; border:1px solid rgba(148,163,184,0.08); border-radius:999px; overflow:hidden; }
+        .mix-fill { height:100%; background:linear-gradient(90deg, #38BDF8 0%, #22C55E 100%); border-radius:999px; }
+        .mix-value { color:#94A3B8; font-size:0.82rem; text-align:right; }
+        .flow-step {
+            color:#E2E8F0; font-size:0.90rem; font-weight:700; padding:10px 12px; text-align:center;
+            border-radius:14px; background:#0F172A; border:1px solid rgba(148,163,184,0.08); margin:8px 0;
+        }
+        .flow-arrow { text-align:center; color:#64748B; font-size:1.05rem; margin:2px 0; }
         div[data-testid="stButton"] > button {
-            border-radius:12px; min-height:40px; font-weight:700; border:1px solid rgba(148,163,184,0.12);
-            background: #0F172A;
-            color:#F8FAFC;
+            border-radius:12px; min-height:38px; font-weight:700; border:1px solid rgba(148,163,184,0.12);
+            background:#0F172A; color:#F8FAFC; box-shadow:none;
         }
         div[data-testid="stButton"] > button:hover {
-            border-color: rgba(148,163,184,0.24);
-            color:#FFFFFF;
-            box-shadow:none;
+            border-color:rgba(148,163,184,0.22); color:#FFFFFF;
         }
         @media (max-width: 1100px) {
-            .metric-grid, .dashboard-dual { grid-template-columns: repeat(2,minmax(0,1fr)); }
-            .idea-detail-grid, .mini-kpi-grid { grid-template-columns: 1fr; }
+            .metric-grid, .dashboard-dual, .mini-kpi-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+            .idea-line, .idea-line-compact, .idea-detail-grid { grid-template-columns: 1fr; }
+            .mix-row { grid-template-columns: 90px 1fr 52px; }
         }
         @media (max-width: 760px) {
-            .metric-grid, .dashboard-dual { grid-template-columns: 1fr; }
-            .topbar { flex-direction:column; align-items:flex-start; }
+            .metric-grid, .dashboard-dual, .mini-kpi-grid { grid-template-columns: 1fr; }
+            .topbar { flex-direction:column; }
             .brand-badge-wrap { justify-content:flex-start; }
-            .idea-main { flex-direction:column; align-items:flex-start; }
-            .idea-right { justify-content:flex-start; }
         }
         </style>
         """,
@@ -985,21 +963,22 @@ def inject_css() -> None:
     )
 
 
-
 def render_topbar() -> None:
     cart_count = len(get_radar_cart()) if STREAMLIT_AVAILABLE else 0
+    demo_label = get_app_state("demo_seed_label", "")
+    demo_text = f" · {demo_label}" if demo_label else ""
     st.markdown(
         f"""
         <div class="topbar">
             <div>
                 <div class="brand-title">{APP_TITLE}</div>
-                <div class="brand-sub">{APP_SUBTITLE}</div>
-                <div class="brand-copy">Portföyünü sade ve net şekilde takip et. Atlas sadece gerçekten dikkat etmeye değer alanları öne çıkarır.</div>
+                <div class="brand-sub">{APP_SUBTITLE}{demo_text}</div>
+                <div class="brand-copy">Ana ekranda önce rakamı ve durumu gör. Detaya ancak gerçekten ihtiyaç olduğunda gir.</div>
             </div>
             <div class="brand-badge-wrap">
-                <div class="hero-badge">🧭 Portföy odaklı</div>
                 <div class="hero-badge">💵 USD / TL</div>
-                <div class="hero-badge">🛒 Sepet: {cart_count}</div>
+                <div class="hero-badge">🧭 Portföy odaklı</div>
+                <div class="hero-badge">🛒 Sepet {cart_count}</div>
             </div>
         </div>
         """,
@@ -1928,6 +1907,7 @@ def render_dashboard_chart_allocation(open_rows: List[Dict[str, Any]], snapshot:
 
 
 def render_opportunity_card(row: Dict[str, Any], key_prefix: str, compact: bool = False) -> None:
+    symbol = str(row.get("Sembol", "-"))
     action = str(row.get("Aksiyon", "İzlenebilir fırsat"))
     price_value = row.get("Fiyat")
     price_text = format_price(float(price_value), is_money=False) if price_value not in [None, "", np.nan] else "-"
@@ -1937,77 +1917,76 @@ def render_opportunity_card(row: Dict[str, Any], key_prefix: str, compact: bool 
     stop_text = format_price(row.get("Stop"), is_money=False) if row.get("Stop") not in [None, ""] else "-"
     target_text = format_price(row.get("Hedef"), is_money=False) if row.get("Hedef") not in [None, ""] else "-"
     onerilen = float(row.get("Önerilen Tutar", 0.0) or 0.0)
+    amount_text = "-" if action == "Kar alma" else format_price(onerilen)
+    grid_class = "idea-line-compact" if compact else "idea-line"
 
     st.markdown('<div class="idea-row">', unsafe_allow_html=True)
     st.markdown(
         f"""
-        <div class="idea-main">
-            <div>
-                <div class="idea-symbol">{row['Sembol']}</div>
+        <div class="{grid_class}">
+            <div class="idea-symbol-wrap">
+                <div class="idea-symbol">{symbol}</div>
                 <div class="idea-subline">{action}</div>
             </div>
-            <div class="idea-right">
-                <div class="price-chip">Son fiyat: {price_text}</div>
-                <div class="status-pill">Skor {score_text}</div>
+            <div>
+                <div class="idea-col-label">Son fiyat</div>
+                <div class="idea-col-value">{price_text}</div>
+            </div>
+            <div>
+                <div class="idea-col-label">Önerilen</div>
+                <div class="idea-col-value">{amount_text}</div>
+            </div>
+            <div>
+                <div class="idea-col-label">Atlas skoru</div>
+                <div class="idea-col-value soft">{score_text}</div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    info_cols = st.columns([1.05, 1.0, 0.9, 1.05])
-    with info_cols[0]:
-        st.caption("Durum")
-        st.write(action)
-    with info_cols[1]:
-        st.caption("Önerilen tutar")
-        st.write(format_price(onerilen) if action != "Kar alma" else "-")
-    with info_cols[2]:
-        st.caption("Risk/Getiri")
-        st.write(rr_text)
-    with info_cols[3]:
+    b1, b2 = st.columns([1.05, 1])
+    with b1:
         if action == "Kar alma":
-            st.button(f"{row['Sembol']} izle", key=f"watch_{key_prefix}_{row['Sembol']}", use_container_width=True)
+            st.button(f"{symbol} izle", key=f"watch_{key_prefix}_{symbol}", use_container_width=True)
         else:
-            if st.button(f"{row['Sembol']} sepete ekle", key=f"push_{key_prefix}_{row['Sembol']}", use_container_width=True):
+            if st.button(f"{symbol} sepete ekle", key=f"push_{key_prefix}_{symbol}", use_container_width=True):
                 if add_to_radar_cart(row):
-                    st.success(f"{row['Sembol']} sepete eklendi.")
+                    st.success(f"{symbol} sepete eklendi.")
                 else:
-                    st.info(f"{row['Sembol']} zaten sepette.")
+                    st.info(f"{symbol} zaten sepette.")
                 st.rerun()
-
-    with st.expander(f"{row['Sembol']} detayı", expanded=False):
-        st.markdown(f"<div class='idea-message'>{row['Mesaj']}</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="idea-detail-grid">
-                <div class="idea-detail"><div class="idea-detail-label">Stop</div><div class="idea-detail-value">{stop_text}</div></div>
-                <div class="idea-detail"><div class="idea-detail-label">Hedef</div><div class="idea-detail-value">{target_text}</div></div>
-                <div class="idea-detail"><div class="idea-detail-label">Aksiyon</div><div class="idea-detail-value">{action}</div></div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    with b2:
+        with st.expander(f"{symbol} detayı", expanded=False):
+            st.markdown(f"<div class='idea-message'>{row.get('Mesaj', '')}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"""
+                <div class="idea-detail-grid">
+                    <div class="idea-detail"><div class="idea-detail-label">Risk/Getiri</div><div class="idea-detail-value">{rr_text}</div></div>
+                    <div class="idea-detail"><div class="idea-detail-label">Stop</div><div class="idea-detail-value">{stop_text}</div></div>
+                    <div class="idea-detail"><div class="idea-detail-label">Hedef</div><div class="idea-detail-value">{target_text}</div></div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
     st.markdown('</div>', unsafe_allow_html=True)
-
 
 
 def render_today_atlas_found(radar_sections: Dict[str, Any]) -> None:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Bugün Atlas Ne Buldu?</div><div class="section-sub">Ana ekranda sadece kısa liste var. Detay istersen satırı açarsın.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Bugün Atlas Ne Buldu?</div><div class="section-sub">Önce kısa listeyi gör. Uygun bulduğunu sepete ekle, diğerleri ekranda kalsın.</div>', unsafe_allow_html=True)
     if radar_sections["toplam"] == 0:
         st.info("Bugün izlenebilir bir fırsat görünmüyor.")
         st.markdown('</div>', unsafe_allow_html=True)
         return
-
     shown = 0
     for group_name, items in [("Ekleme", radar_sections["ekleme"]), ("Yeni", radar_sections["yeni"]), ("Kar Al", radar_sections["kar_al"])]:
         for i, row in enumerate(items[:2]):
             render_opportunity_card(row, key_prefix=f"dash_{group_name}_{i}", compact=True)
             shown += 1
-            if shown >= 4:
+            if shown >= 5:
                 break
-        if shown >= 4:
+        if shown >= 5:
             break
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2069,17 +2048,55 @@ def render_cart_page(snapshot: Dict[str, float]) -> None:
 
 
 
+def classify_symbol_risk(symbol: str) -> str:
+    sym = str(symbol).upper()
+    if sym in {"SGOV", "BIL", "SHY"}:
+        return "Nakit / ETF"
+    if sym in {"GOOGL", "AAPL", "MSFT", "VOO", "QQQM", "SCHD", "SPY"}:
+        return "Stabil"
+    if sym in {"PANW", "NET", "AMZN", "META", "NVDA"}:
+        return "Büyüme"
+    return "Agresif"
+
+
+def get_portfolio_mix(open_rows: List[Dict[str, Any]], cash_value: float) -> Dict[str, float]:
+    buckets = {"Stabil": 0.0, "Büyüme": 0.0, "Agresif": 0.0, "Nakit / ETF": 0.0}
+    total = float(cash_value or 0.0)
+    for row in open_rows:
+        val = float(row.get("Pozisyon Değeri Sayısal", 0.0) or 0.0)
+        total += val
+        buckets[classify_symbol_risk(row.get("Sembol", ""))] += val
+    buckets["Nakit / ETF"] += float(cash_value or 0.0)
+    if total <= 0:
+        return {k: 0.0 for k in buckets}
+    return {k: (v / total) * 100 for k, v in buckets.items()}
+
+
+def render_portfolio_mix_card(open_rows: List[Dict[str, Any]], snapshot: Dict[str, float]) -> None:
+    mix = get_portfolio_mix(open_rows, snapshot.get("cash", 0.0))
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Portföy Dengesi</div><div class="section-sub">Portföy yapısını tek bakışta gör. Sistem yeni önerileri bu dengeye göre yumuşatır.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="mix-wrap">', unsafe_allow_html=True)
+    for label in ["Stabil", "Büyüme", "Agresif", "Nakit / ETF"]:
+        value = float(mix.get(label, 0.0) or 0.0)
+        st.markdown(
+            f"<div class='mix-row'><div class='mix-label'>{label}</div><div class='mix-bar'><div class='mix-fill' style='width:{min(100.0, value):.2f}%'></div></div><div class='mix-value'>%{value:.1f}</div></div>",
+            unsafe_allow_html=True,
+        )
+    st.markdown('</div></div>', unsafe_allow_html=True)
+
+
 def render_dashboard_page(profile_name: str, open_rows: List[Dict[str, Any]], snapshot: Dict[str, float]) -> None:
     radar_sections = get_radar_sections(open_rows, snapshot["cash"], snapshot["riskable"], profile_name)
     st.markdown('<div class="card hero-panel">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Genel Görünüm</div><div class="section-sub">Midas tarzı daha sade bir özet: ana rakamlar üstte, kısa liste altta.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Genel Görünüm</div><div class="section-sub">Midas gibi sade: önce ana rakamlar, sonra kısa liste, sonra detay.</div>', unsafe_allow_html=True)
     st.markdown(
         f"""
         <div class="metric-grid">
             <div class="metric-card"><div class="metric-label">Toplam Varlık</div><div class="metric-value">{format_price(snapshot['current_equity'])}</div><div class="metric-note">Portföy + nakit</div></div>
-            <div class="metric-card"><div class="metric-label">Net Sermaye</div><div class="metric-value">{format_price(snapshot['net_capital'])}</div><div class="metric-note">Giriş ve çıkış sonrası baz</div></div>
+            <div class="metric-card"><div class="metric-label">Net Sermaye</div><div class="metric-value">{format_price(snapshot['net_capital'])}</div><div class="metric-note">Giriş / çıkış bazın</div></div>
             <div class="metric-card"><div class="metric-label">Getiri</div><div class="metric-value">%{round(float(snapshot['total_return_pct']), 2)}</div><div class="metric-note">Toplam performans</div></div>
-            <div class="metric-card"><div class="metric-label">Radar</div><div class="metric-value">{radar_sections['toplam']} fırsat</div><div class="metric-note">Bugün öne çıkanlar</div></div>
+            <div class="metric-card"><div class="metric-label">Sepet</div><div class="metric-value">{len(get_radar_cart()) if STREAMLIT_AVAILABLE else 0}</div><div class="metric-note">Hazır bekleyen fırsat</div></div>
         </div>
         <div class="mini-kpi-grid">
             <div class="mini-kpi"><div class="mini-kpi-label">Nakit</div><div class="mini-kpi-value">{format_price(snapshot['cash'])}</div></div>
@@ -2091,44 +2108,47 @@ def render_dashboard_page(profile_name: str, open_rows: List[Dict[str, Any]], sn
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
-    left, right = st.columns([1.1, 0.9])
+    left, right = st.columns([1.15, 0.85])
     with left:
         render_today_atlas_found(radar_sections)
     with right:
+        render_portfolio_mix_card(open_rows, snapshot)
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">Kısa Özet</div>', unsafe_allow_html=True)
         st.markdown(
             f"""
             <div class="list-shell">
                 <div class="list-row"><div class="list-left">Aktif profil</div><div class="list-right">{profile_name}</div></div>
-                <div class="list-row"><div class="list-left">Ekleme fırsatı</div><div class="list-right">{len(radar_sections['ekleme'])} adet</div></div>
-                <div class="list-row"><div class="list-left">Yeni pozisyon</div><div class="list-right">{len(radar_sections['yeni'])} adet</div></div>
-                <div class="list-row"><div class="list-left">Kar alma</div><div class="list-right">{len(radar_sections['kar_al'])} adet</div></div>
+                <div class="list-row"><div class="list-left">Yeni pozisyon</div><div class="list-right">{len(radar_sections['yeni'])} aday</div></div>
+                <div class="list-row"><div class="list-left">Ekleme fırsatı</div><div class="list-right">{len(radar_sections['ekleme'])} aday</div></div>
+                <div class="list-row"><div class="list-left">Kar alma seviyesi</div><div class="list-right">{len(radar_sections['kar_al'])} aday</div></div>
                 <div class="list-row"><div class="list-left">Tahmini vergi etkisi</div><div class="list-right">{format_try(snapshot['estimated_tax_try'])}</div></div>
             </div>
             """,
             unsafe_allow_html=True,
         )
         st.markdown('</div>', unsafe_allow_html=True)
-        render_dashboard_chart_allocation(open_rows, snapshot)
 
     render_weekly_plan(snapshot, open_rows, radar_sections)
-    render_dashboard_chart_equity(snapshot)
-
+    lower_left, lower_right = st.columns([1, 1])
+    with lower_left:
+        render_dashboard_chart_allocation(open_rows, snapshot)
+    with lower_right:
+        render_dashboard_chart_equity(snapshot)
 
 
 def render_radar_page(profile_name: str, open_rows: List[Dict[str, Any]], snapshot: Dict[str, float]) -> None:
     radar_sections = get_radar_sections(open_rows, snapshot["cash"], snapshot["riskable"], profile_name)
     total_scanned = len(RISKY_UNIVERSE)
     st.markdown('<div class="card hero-panel">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Atlas Fırsat Radarı</div><div class="section-sub">Liste görünümü sade tutuldu. Önce satırı gör, sonra istersen detayı aç.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Fırsat Radarı</div><div class="section-sub">Kalabalık kart yok. Önce satır, sonra detay.</div>', unsafe_allow_html=True)
     st.markdown(
         f"""
         <div class="metric-grid">
-            <div class="metric-card"><div class="metric-label">Taranan Varlık</div><div class="metric-value">{total_scanned}</div><div class="metric-note">Hisse ve ETF evreni</div></div>
-            <div class="metric-card"><div class="metric-label">Yeni Pozisyon</div><div class="metric-value">{len(radar_sections['yeni'])}</div><div class="metric-note">Portföyde olmayan adaylar</div></div>
-            <div class="metric-card"><div class="metric-label">Ekleme</div><div class="metric-value">{len(radar_sections['ekleme'])}</div><div class="metric-note">Mevcut pozisyonlar</div></div>
-            <div class="metric-card"><div class="metric-label">Kar Alma</div><div class="metric-value">{len(radar_sections['kar_al'])}</div><div class="metric-note">Olgunlaşanlar</div></div>
+            <div class="metric-card"><div class="metric-label">Taranan</div><div class="metric-value">{total_scanned}</div><div class="metric-note">Hisse ve ETF</div></div>
+            <div class="metric-card"><div class="metric-label">Yeni</div><div class="metric-value">{len(radar_sections['yeni'])}</div><div class="metric-note">Portföyde olmayan</div></div>
+            <div class="metric-card"><div class="metric-label">Ekleme</div><div class="metric-value">{len(radar_sections['ekleme'])}</div><div class="metric-note">Mevcut pozisyon</div></div>
+            <div class="metric-card"><div class="metric-label">Kar alma</div><div class="metric-value">{len(radar_sections['kar_al'])}</div><div class="metric-note">Olgunlaşanlar</div></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2147,7 +2167,7 @@ def render_radar_page(profile_name: str, open_rows: List[Dict[str, Any]], snapsh
             st.caption("Şu an öne çıkan bir aksiyon görünmüyor.")
             st.markdown('</div>', unsafe_allow_html=True)
             continue
-        for i, row in enumerate(items[:6]):
+        for i, row in enumerate(items[:8]):
             render_opportunity_card(row, key_prefix=f"radar_{title}_{i}", compact=False)
         st.markdown('</div>', unsafe_allow_html=True)
 
