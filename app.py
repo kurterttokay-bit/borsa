@@ -1,191 +1,219 @@
 import sqlite3
 import time
-import pandas as pd
+import unittest
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
-import yfinance as yf
+import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
-from datetime import datetime
+import yfinance as yf
 
-# --- KONFİGÜRASYON & GÖRSEL TEMA ---
-st.set_page_config(page_title="AURA Terminal", layout="wide", initial_sidebar_state="collapsed")
+# --- KONFİGÜRASYON & İSİMLENDİRME ---
+APP_TITLE = "AURA TERMINAL v2.0"
+DB_PATH = "aura_finance.db"
 
-def apply_custom_style():
-    st.markdown("""
-        <style>
-        .main { background-color: #0e1117; }
-        .stMetric { background-color: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 15px !important; }
-        .stActionButton { background-color: #238636 !important; color: white !important; }
-        div[data-testid="stExpander"] { border: 1px solid #30363d; background-color: #0d1117; border-radius: 8px; }
-        .price-up { color: #26a69a; font-weight: bold; }
-        .price-down { color: #ef5350; font-weight: bold; }
-        </style>
-    """, unsafe_allow_html=True)
+# --- 1. VERİTABANI VE MODEL KATMANI ---
+class AuraDB:
+    def __init__(self, db_path: str = DB_PATH):
+        self.db_path = db_path
+        self._init_db()
 
-# --- VERİTABANI YÖNETİMİ ---
-DB_PATH = "aura_terminal.db"
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            # Portföy: Sembol, Adet, Maliyet, Tarih, Para Birimi
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS positions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    quantity REAL NOT NULL,
+                    entry_price REAL NOT NULL,
+                    entry_date TEXT NOT NULL,
+                    currency TEXT NOT NULL
+                )
+            """)
+            # Nakit Akışı
+            cursor.execute("CREATE TABLE IF NOT EXISTS cash_flow (id INTEGER PRIMARY KEY, amount REAL, currency TEXT)")
+            conn.commit()
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    # Portföy tablosu (BIST/US desteği ve Döviz tipi eklendi)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS portfolio (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT,
-            quantity REAL,
-            entry_price REAL,
-            entry_date TEXT,
-            currency TEXT DEFAULT 'USD'
-        )
-    """)
-    # Nakit hareketleri
-    cursor.execute("CREATE TABLE IF NOT EXISTS cash (id INTEGER PRIMARY KEY, balance REAL, currency TEXT)")
-    conn.commit()
-    conn.close()
+    def add_position(self, symbol: str, qty: float, price: float, currency: str):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO positions (symbol, quantity, entry_price, entry_date, currency) VALUES (?, ?, ?, ?, ?)",
+                (symbol.upper(), qty, price, datetime.now().isoformat(), currency)
+            )
 
-# --- YARDIMCI FONKSİYONLAR (BIST & KUR) ---
+    def get_all_positions(self) -> pd.DataFrame:
+        with sqlite3.connect(self.db_path) as conn:
+            return pd.read_sql_query("SELECT * FROM positions", conn)
+
+# --- 2. TEKNİK ANALİZ MOTORU ---
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    if len(df) < 20: return df
+    df = df.copy()
+    # RSI
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    # EMA
+    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+    # Volatilite (ATR)
+    high_low = df['High'] - df['Low']
+    df['ATR'] = high_low.rolling(window=14).mean()
+    return df
+
+# --- 3. AKILLI BIST VE KUR SİSTEMİ ---
 @st.cache_data(ttl=3600)
-def get_usd_try():
+def get_usd_try_rate():
     try:
-        return yf.Ticker("USDTRY=X").history(period="1d")['Close'].iloc[-1]
+        data = yf.download("USDTRY=X", period="1d", progress=False)
+        return data['Close'].iloc[-1]
     except:
         return 32.50
 
-def normalize_symbol(symbol: str):
+def get_clean_symbol(symbol: str) -> Tuple[str, str]:
     s = symbol.upper().strip()
-    if s.isdigit() or any(x in s for x in ["THYAO", "EREGL", "ASELS", "SISE", "EKGYO"]):
+    # Türk hissesi tespiti (Sadece rakam veya bilinen BIST kodları)
+    bist_keywords = ["THYAO", "EREGL", "ASELS", "SISE", "KCHOL", "TUPRS"]
+    if s.isdigit() or any(k in s for k in bist_keywords):
         if not s.endswith(".IS"): return s + ".IS", "TRY"
     if s.endswith(".IS"): return s, "TRY"
     return s, "USD"
 
-# --- ANALİZ MOTORU ---
-def fetch_and_analyze(symbol: str):
-    sym, curr = normalize_symbol(symbol)
-    ticker = yf.Ticker(sym)
-    hist = ticker.history(period="60d")
-    if hist.empty: return None
-    
-    last_price = hist['Close'].iloc[-1]
-    change = ((last_price / hist['Close'].iloc[-2]) - 1) * 100
-    
-    # Teknik Göstergeler (Görsel Skorlama için)
-    sma20 = hist['Close'].rolling(20).mean().iloc[-1]
-    rsi = 100 - (100 / (1 + hist['Close'].diff().gt(0).rolling(14).sum() / hist['Close'].diff().lt(0).rolling(14).sum()))
-    
-    # Hacim Patlaması Kontrolü (Volume Spike)
-    avg_vol = hist['Volume'].tail(20).mean()
-    current_vol = hist['Volume'].iloc[-1]
-    vol_spike = current_vol > (avg_vol * 1.5)
-    
-    return {
-        "symbol": sym, "price": last_price, "change": change, 
-        "curr": curr, "rsi": rsi.iloc[-1], "above_sma": last_price > sma20,
-        "vol_spike": vol_spike, "hist": hist
-    }
+# --- 4. GÖRSEL ŞÖLEN KOMPONENTLERİ ---
+def apply_ui_style():
+    st.markdown("""
+        <style>
+        .stApp { background-color: #0b0e14; color: #e0e0e0; }
+        .metric-card {
+            background: linear-gradient(135deg, #161b22 0%, #0d1117 100%);
+            border: 1px solid #30363d;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .stMetric { border: 1px solid #30363d; padding: 10px; border-radius: 10px; background: #161b22; }
+        </style>
+    """, unsafe_allow_html=True)
 
-# --- GÖRSEL ŞÖLEN BÖLÜMLERİ ---
-def render_header(usd_rate):
-    col1, col2, col3 = st.columns([2,1,1])
-    with col1:
-        st.title("💎 AURA Terminal")
-        st.caption(f"Finansal Komuta Merkezi | USDTRY: {usd_rate:.4f}")
-    with col2:
-        st.metric("Piyasa Durumu", "Açık", delta="BIST / NASDAQ")
-    with col3:
-        if st.button("🔄 Verileri Yenile"): st.rerun()
-
-def render_portfolio_treemap(df_portfolio, usd_rate):
-    """Müşterinin gözünü boyayacak o meşhur Treemap"""
-    if df_portfolio.empty:
-        st.info("Portföyünüzde henüz varlık bulunmuyor.")
-        return
-
-    # Fiyatları eşitleme (BIST hisselerini USD'ye çevirerek büyüklük karşılaştırması yap)
-    df_portfolio['size_usd'] = df_portfolio.apply(
-        lambda x: (x['quantity'] * x['current_price'] / usd_rate) if x['currency'] == 'TRY' 
-        else (x['quantity'] * x['current_price']), axis=1
-    )
+def plot_fancy_treemap(df_p, usd_rate):
+    if df_p.empty: return
+    # Tüm değerleri USD'ye eşitle (Görsel boyut için)
+    df_p['val_usd'] = df_p.apply(lambda x: (x['qty'] * x['price'] / usd_rate) if x['curr'] == 'TRY' else (x['qty'] * x['price']), axis=1)
     
     fig = px.treemap(
-        df_portfolio,
-        path=[px.Constant("Varlıklarım"), 'symbol'],
-        values='size_usd',
-        color='pnl_percent',
-        color_continuous_scale='RdYlGn',
+        df_p, path=[px.Constant("Portföy"), 'symbol'], values='val_usd',
+        color='pnl_pct', color_continuous_scale='RdYlGn',
         color_continuous_midpoint=0,
-        title="Varlık Dağılımı ve Performans Isı Haritası (USD Bazlı)"
+        title="Varlık Dağılımı ve Performans Isı Haritası"
     )
-    fig.update_layout(margin=dict(t=30, l=0, r=0, b=0), height=400, template="plotly_dark")
+    fig.update_layout(template="plotly_dark", margin=dict(t=30, l=0, r=0, b=0))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- ANA UYGULAMA DÖNGÜSÜ ---
+# --- 5. ANA EKRAN (STREAMLIT) ---
 def main():
-    apply_custom_style()
-    init_db()
-    usd_rate = get_live_usd_try() if 'get_live_usd_try' in locals() else get_usd_try()
-    
-    render_header(usd_rate)
-    
-    tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "🔍 Akıllı Analiz", "⚙️ Ayarlar"])
-    
-    with tab1:
-        # Örnek Veri Çekme (Veritabanından gelecek şekilde simüle edildi)
-        # Gerçek uygulamada sqlite'dan çekilen veriler df_portfolio olacak
-        mock_data = {
-            "symbol": ["THYAO.IS", "AAPL", "EREGL.IS", "NVDA"],
-            "quantity": [100, 10, 500, 5],
-            "current_price": [280.50, 185.20, 45.10, 890.0],
-            "pnl_percent": [12.5, -2.1, 5.4, 25.0],
-            "currency": ["TRY", "USD", "TRY", "USD"]
-        }
-        df_portfolio = pd.DataFrame(mock_data)
-        
-        col_m1, col_m2, col_m3 = st.columns(3)
-        total_usd = (df_portfolio[df_portfolio['currency']=='USD'].apply(lambda x: x['quantity']*x['current_price'], axis=1).sum() + 
-                     df_portfolio[df_portfolio['currency']=='TRY'].apply(lambda x: x['quantity']*x['current_price']/usd_rate, axis=1).sum())
-        
-        col_m1.metric("Toplam Varlık (USD)", f"${total_usd:,.2f}")
-        col_m2.metric("Toplam Varlık (TRY)", f"₺{total_usd*usd_rate:,.2f}")
-        col_m3.metric("Günlük Kar/Zarar", "%+2.4", delta="145.20 $")
+    apply_ui_style()
+    db = AuraDB()
+    usd_rate = get_usd_try_rate()
 
-        render_portfolio_treemap(df_portfolio, usd_rate)
-        
-        st.subheader("Varlık Detayları")
-        st.dataframe(df_portfolio, use_container_width=True)
+    st.title(f"💎 {APP_TITLE}")
+    st.caption(f"Veri Odaklı Yatırım Terminali | Canlı USD/TRY: {usd_rate:.4f}")
+
+    # --- SIDEBAR: YENİ İŞLEM ---
+    with st.sidebar:
+        st.header("➕ Yeni Pozisyon")
+        with st.form("trade_form"):
+            sym_input = st.text_input("Sembol (Örn: THYAO veya AAPL)")
+            qty_input = st.number_input("Adet", min_value=0.1)
+            price_input = st.number_input("Giriş Fiyatı", min_value=0.01)
+            submitted = st.form_submit_button("Portföye Ekle")
+            
+            if submitted and sym_input:
+                clean_s, curr = get_clean_symbol(sym_input)
+                db.add_position(clean_s, qty_input, price_input, curr)
+                st.success(f"{clean_s} Eklendi!")
+                st.rerun()
+
+    # --- DASHBOARD ---
+    df_db = db.get_all_positions()
+    
+    tab1, tab2 = st.tabs(["📊 Portföy Analizi", "🎯 Akıllı Radar"])
+
+    with tab1:
+        if not df_db.empty:
+            # Anlık Fiyatları Çek (Hızlı Erişim)
+            symbols = df_db['symbol'].unique().tolist()
+            prices = {}
+            for s in symbols:
+                try:
+                    t = yf.Ticker(s)
+                    prices[s] = t.fast_info['last_price']
+                except: prices[s] = 0
+
+            # Tabloyu Hazırla
+            df_display = df_db.copy()
+            df_display['current'] = df_display['symbol'].map(prices)
+            df_display['pnl_pct'] = (df_display['current'] / df_display['entry_price'] - 1) * 100
+            
+            # Üst Metrikler
+            c1, c2, c3 = st.columns(3)
+            total_val_usd = sum([
+                (row['quantity'] * row['current'] / usd_rate) if row['currency'] == 'TRY' 
+                else (row['quantity'] * row['current']) 
+                for _, row in df_display.iterrows()
+            ])
+            c1.metric("Toplam Değer (USD)", f"${total_val_usd:,.2f}")
+            c2.metric("Toplam Değer (TRY)", f"₺{total_val_usd*usd_rate:,.2f}")
+            c3.metric("Piyasa Durumu", "Aktif", delta="Global")
+
+            # Treemap "Şovu"
+            plot_fancy_treemap(
+                pd.DataFrame({
+                    'symbol': df_display['symbol'],
+                    'qty': df_display['quantity'],
+                    'price': df_display['current'],
+                    'pnl_pct': df_display['pnl_pct'],
+                    'curr': df_display['currency']
+                }), usd_rate
+            )
+
+            st.subheader("📜 Aktif Pozisyonlar")
+            st.dataframe(df_display[['symbol', 'quantity', 'entry_price', 'current', 'pnl_pct', 'currency']], use_container_width=True)
+        else:
+            st.info("Henüz pozisyon açılmamış. Yan menüden ilk hisseni ekle!")
 
     with tab2:
-        st.subheader("Akıllı Sembol Taraması")
-        search_sym = st.text_input("Sembol Giriniz (Örn: THYAO, AAPL, BTC-USD)", "").upper()
-        if search_sym:
-            with st.spinner("Veriler işleniyor..."):
-                analysis = fetch_and_analyze(search_sym)
-                if analysis:
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Anlık Fiyat", f"{analysis['price']:.2f} {analysis['curr']}")
-                    c2.metric("RSI (14)", f"{analysis['rsi']:.1f}")
-                    status = "GÜÇLÜ" if analysis['vol_spike'] and analysis['above_sma'] else "ZAYIF"
-                    c3.metric("Sinyal Gücü", status, delta="Hacim Destekli" if analysis['vol_spike'] else "Düşük Hacim")
-                    
-                    # Mum Grafiği (Görsel Show)
-                    fig = go.Figure(data=[go.Candlestick(
-                        x=analysis['hist'].index,
-                        open=analysis['hist']['Open'],
-                        high=analysis['hist']['High'],
-                        low=analysis['hist']['Low'],
-                        close=analysis['hist']['Close']
-                    )])
-                    fig.update_layout(title=f"{search_sym} Teknik Görünüm", template="plotly_dark", height=500)
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    if st.button(f"{search_sym} Portföye Ekle"):
-                        st.success("Veritabanı bağlantısı aktif olduğunda eklenecektir.")
-
-    with tab3:
-        st.info("AURA Terminal v2.0 - BIST & Global Edition")
-        if st.button("Tüm Veritabanını Sıfırla"):
-            st.warning("Bu işlem geri alınamaz!")
+        st.subheader("🔍 Teknik Analiz Radarı")
+        radar_sym = st.text_input("Analiz Edilecek Sembol", value="THYAO")
+        if radar_sym:
+            s_final, _ = get_clean_symbol(radar_sym)
+            data = yf.download(s_final, period="60d", progress=False)
+            if not data.empty:
+                data = add_indicators(data)
+                
+                # Candlestick Chart
+                fig = go.Figure(data=[go.Candlestick(
+                    x=data.index, open=data['Open'], high=data['High'], low=data['Low'], close=data['Close'],
+                    name=s_final
+                )])
+                # Göstergeleri Ekle
+                fig.add_trace(go.Scatter(x=data.index, y=data['EMA20'], name='EMA20', line=dict(color='orange', width=1)))
+                fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Sinyal Durumu
+                last_rsi = data['RSI'].iloc[-1]
+                col_r1, col_r2 = st.columns(2)
+                col_r1.write(f"**RSI (14):** {last_rsi:.2f}")
+                if last_rsi < 30: col_r1.success("Aşırı Satım (Fırsat?)")
+                elif last_rsi > 70: col_r1.error("Aşırı Alım (Dikkat!)")
+                else: col_r1.info("Nötr Bölge")
 
 if __name__ == "__main__":
     main()
