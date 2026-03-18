@@ -1047,7 +1047,8 @@ def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
         symbol = str(row["symbol"])
         raw = download_symbol(symbol, "1G")
         current_price = None
-        pnl = 0.0
+        gross_pnl = 0.0
+        net_pnl = 0.0
         pnl_pct = 0.0
         stop = None
         target = None
@@ -1055,13 +1056,16 @@ def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
         alert = "Pozisyon izleniyor"
         value = 0.0
         buy_fee = float(row.get("buy_fee", 0) or 0)
+        gross_amount = float(row.get("gross_amount", 0) or (float(row["entry_price"]) * float(row["quantity"])))
         if not raw.empty:
             df_ind = add_indicators(raw)
             current_price = float(df_ind["Close"].iloc[-1])
             value = current_price * float(row["quantity"])
             invested_now += value
-            pnl = ((current_price - float(row["entry_price"])) * float(row["quantity"])) - buy_fee
-            pnl_pct = ((current_price / float(row["entry_price"])) - 1) * 100 if float(row["entry_price"]) else 0.0
+            gross_pnl = (current_price - float(row["entry_price"])) * float(row["quantity"])
+            net_pnl = gross_pnl - buy_fee
+            net_cost = max((float(row["entry_price"]) * float(row["quantity"])) + buy_fee, 1e-9)
+            pnl_pct = (net_pnl / net_cost) * 100 if net_cost > 0 else 0.0
             last_atr = safe_float(df_ind["ATR14"].iloc[-1]) or 0.0
             stop = float(row["entry_price"]) - (1.5 * last_atr)
             target = float(row["entry_price"]) + (3.0 * last_atr)
@@ -1075,6 +1079,7 @@ def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
                 action = "AZALT / DİKKAT"
                 alert = "Zarar artıyor, dikkat gerekli"
         entry_value = (float(row["entry_price"]) * float(row["quantity"])) + buy_fee
+        fee_pct = (buy_fee / max(gross_amount, 1e-9)) * 100 if gross_amount > 0 else 0.0
         rows.append(
             {
                 "ID": int(row["id"]),
@@ -1087,19 +1092,24 @@ def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
                 "Adet": float(row["quantity"]),
                 "Pozisyon Değeri Sayısal": value,
                 "Giriş Değeri Sayısal": entry_value,
-                "PnL": format_price(pnl),
+                "Brüt PnL": format_price(gross_pnl),
+                "Net PnL": format_price(net_pnl),
+                "PnL": format_price(net_pnl),
                 "PnL %": f"%{round(float(pnl_pct), 2)}",
                 "Komisyon": format_price(buy_fee),
+                "Komisyon %": f"%{round(fee_pct, 2)}",
                 "% Portföy": "-",
                 "Durum": action,
                 "Stop": format_price(stop) if stop is not None else "-",
                 "Hedef": format_price(target) if target is not None else "-",
                 "Hedef Pay": f"%{round(float(row.get('target_weight', 0))*100, 0)}" if float(row.get("target_weight", 0)) > 0 else "-",
-                "Alım Tutarı": format_price(float(row.get("gross_amount", 0) or (float(row["entry_price"]) * float(row["quantity"])))),
+                "Alım Tutarı": format_price(gross_amount),
                 "Hedef Pay Sayısal": float(row.get("target_weight", 0) or 0),
                 "Not": str(row["note"] or ""),
                 "Uyarı": alert,
-                "PnL Sayısal": pnl,
+                "Brüt PnL Sayısal": gross_pnl,
+                "PnL Sayısal": net_pnl,
+                "Komisyon Sayısal": buy_fee,
                 "Mevcut Pay Sayısal": 0.0,
             }
         )
@@ -1110,10 +1120,17 @@ def compute_portfolio_snapshot(open_rows: List[Dict[str, Any]], invested_now: fl
     flow = get_cash_flow_summary()
     net_capital = flow["net_capital"]
     unrealized_pnl = float(sum(r["PnL Sayısal"] for r in open_rows)) if open_rows else 0.0
+    gross_unrealized_pnl = float(sum(r.get("Brüt PnL Sayısal", r["PnL Sayısal"]) for r in open_rows)) if open_rows else 0.0
+    open_fees = float(sum(r.get("Komisyon Sayısal", 0) or 0 for r in open_rows)) if open_rows else 0.0
     realized_pnl = 0.0
+    realized_fees = 0.0
     history_df = load_history(500)
     if not history_df.empty:
         realized_pnl = float(pd.to_numeric(history_df["pnl"], errors="coerce").fillna(0).sum())
+        if "buy_fee" in history_df.columns:
+            realized_fees = float(pd.to_numeric(history_df["buy_fee"], errors="coerce").fillna(0).sum())
+        if "sell_fee" in history_df.columns:
+            realized_fees += float(pd.to_numeric(history_df["sell_fee"], errors="coerce").fillna(0).sum())
     dividend_summary = get_dividend_summary()
     net_dividends = float(dividend_summary["net_dividends"])
     portfolio_value = invested_now
@@ -1126,6 +1143,8 @@ def compute_portfolio_snapshot(open_rows: List[Dict[str, Any]], invested_now: fl
         cash = max(0.0, current_equity - portfolio_value)
     tax_summary = calculate_estimated_tax(history_df)
     riskable = cash * 0.5
+    total_fees = open_fees + realized_fees
+    gross_total_pnl = gross_unrealized_pnl + realized_pnl + net_dividends
     total_pnl = current_equity - net_capital
     total_return_pct = (total_pnl / max(net_capital, 1e-9)) * 100 if net_capital > 0 else 0.0
     after_tax_total_pnl_usd = total_pnl - (tax_summary["estimated_tax_try"] / max(get_usdtry_rate(), 1e-9))
@@ -1140,9 +1159,12 @@ def compute_portfolio_snapshot(open_rows: List[Dict[str, Any]], invested_now: fl
         "current_equity": current_equity,
         "cash": cash,
         "riskable": riskable,
+        "gross_unrealized_pnl": gross_unrealized_pnl,
         "unrealized_pnl": unrealized_pnl,
         "realized_pnl": realized_pnl,
         "dividend_income": net_dividends,
+        "gross_total_pnl": gross_total_pnl,
+        "total_fees": total_fees,
         "total_pnl": total_pnl,
         "total_return_pct": total_return_pct,
         "after_tax_total_pnl": after_tax_total_pnl_usd,
@@ -1263,7 +1285,7 @@ def render_open_positions(rows: List[Dict[str, Any]], current_equity: float) -> 
         return
     for row in rows:
         row["% Portföy"] = f"%{round((row['Pozisyon Değeri Sayısal'] / max(current_equity, 1e-9)) * 100, 2)}"
-    show_df = pd.DataFrame(rows)[["Sembol", "Kaynak", "Alış", "Alım Tutarı", "Komisyon", "Güncel", "PnL", "PnL %", "% Portföy", "Hedef Pay", "Durum", "Stop", "Hedef", "Not"]]
+    show_df = pd.DataFrame(rows)[["Sembol", "Kaynak", "Alış", "Alım Tutarı", "Komisyon", "Komisyon %", "Güncel", "Brüt PnL", "Net PnL", "PnL %", "% Portföy", "Hedef Pay", "Durum", "Stop", "Hedef", "Not"]]
     st.dataframe(show_df, use_container_width=True, hide_index=True)
     st.markdown("#### Pozisyon Sat")
     for row in rows[:8]:
@@ -1756,9 +1778,11 @@ def render_performance_cards(open_rows: List[Dict[str, Any]], snapshot: Dict[str
         realized_pnl = float(history_df["pnl"].sum())
 
     dividend_income = float(snapshot["dividend_income"])
-    unrealized_pnl = float(snapshot["unrealized_pnl"])
-    total_pnl = realized_pnl + unrealized_pnl + dividend_income
     total_return_pct = float(snapshot["total_return_pct"])
+    gross_total_pnl = float(snapshot.get("gross_total_pnl", snapshot["total_pnl"]))
+    net_total_pnl = float(snapshot["total_pnl"])
+    total_fees = float(snapshot.get("total_fees", 0.0))
+    fee_drag_pct = (total_fees / max(float(snapshot["net_capital"]), 1e-9)) * 100 if float(snapshot["net_capital"]) > 0 else 0.0
     confidence_score = 55.0 if closed_count == 0 and open_rows else 50.0
     if closed_count > 0:
         confidence_score = max(0.0, min(100.0, (win_rate * 0.55) + (max(avg_pnl_pct, 0) * 6) + min(closed_count, 20)))
@@ -1771,19 +1795,22 @@ def render_performance_cards(open_rows: List[Dict[str, Any]], snapshot: Dict[str
         best_asset_pnl = sorted_rows[0]["PnL Sayısal"]
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Atlas Performans Özeti</div><div class="section-sub">Trade sonucu ile sermaye hareketlerini ayrı okuyabilmen için güncellendi.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Atlas Performans Özeti</div><div class="section-sub">Brüt kazanç, komisyon ve net sonucu ayrı görün ki küçük alımın gerçek maliyeti kaybolmasın.</div>', unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Net Sermaye", format_price(snapshot["net_capital"]), f"Giriş {format_price(snapshot['deposits'])} / Çıkış {format_price(snapshot['withdrawals'])}")
     c2.metric("Toplam Varlık", format_price(snapshot["current_equity"]), f"Sistem %{round(float(total_return_pct), 2)}")
-    c3.metric("Gerçekleşen K/Z", format_price(realized_pnl), f"{closed_count} kapanan işlem")
-    c4.metric("Net Temettü", format_price(dividend_income), "Portföye geçen nakit")
+    c3.metric("Brüt PnL", format_price(gross_total_pnl), "Komisyon öncesi")
+    c4.metric("Toplam Komisyon", format_price(total_fees), f"Sermayenin %{round(fee_drag_pct, 2)}")
 
     d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Vergi Sonrası K/Z", format_price(snapshot["after_tax_total_pnl"]), f"Tahmini %{round(float(snapshot['after_tax_return_pct']), 2)}")
+    d1.metric("Net PnL", format_price(net_total_pnl), f"Komisyon sonrası %{round(float(total_return_pct), 2)}")
     d2.metric("Tahmini Vergi", format_try(snapshot["estimated_tax_try"]), f"Oran %{round(float(snapshot['estimated_tax_rate']), 1)}")
     d3.metric("En İyi Açık Pozisyon", best_asset, format_price(best_asset_pnl) if best_asset_pnl is not None else "-")
     d4.metric("Atlas Güven Skoru", f"{round(float(confidence_score), 0)}/100", "İç metrik")
+
+    if total_fees > 0:
+        st.caption(f"Not: Hisseler brütte {format_price(gross_total_pnl)} üretmiş olsa da toplam {format_price(total_fees)} komisyon net sonucu {format_price(net_total_pnl)} seviyesine indiriyor.")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
