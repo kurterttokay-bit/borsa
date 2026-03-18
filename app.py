@@ -38,6 +38,19 @@ APP_SUBTITLE = "Basit Anlatan Yatırım Aracı"
 cart_symbols = set()
 DB_PATH = "signals.db"
 INITIAL_CASH = 0.0
+DEFAULT_BUY_FEE = 1.50
+
+MIDAS_DEMO_DATE = "2026-03-18T09:30:00"
+MIDAS_DEMO_INITIAL_TRY = 10000.0
+MIDAS_DEMO_USD = 224.05
+MIDAS_DEMO_USDTRY = 44.6311
+MIDAS_DEMO_POSITIONS = [
+    {"symbol": "ROKU", "entry_price": 97.50, "quantity": 0.323609658, "gross_amount": 31.55, "buy_fee": 1.50, "source": "MIDAS DEMO"},
+    {"symbol": "NET", "entry_price": 213.13, "quantity": 0.140763123, "gross_amount": 30.00, "buy_fee": 1.50, "source": "MIDAS DEMO"},
+    {"symbol": "PANW", "entry_price": 169.76, "quantity": 0.265083236, "gross_amount": 45.00, "buy_fee": 1.50, "source": "MIDAS DEMO"},
+    {"symbol": "GOOGL", "entry_price": 308.22, "quantity": 0.243337421, "gross_amount": 75.00, "buy_fee": 1.50, "source": "MIDAS DEMO"},
+    {"symbol": "MRVL", "entry_price": 91.27, "quantity": 0.383511209, "gross_amount": 35.00, "buy_fee": 1.50, "source": "MIDAS DEMO"},
+]
 
 TIMEFRAME_MAP = {
     "1G": {"interval": "1d", "period": "2y"},
@@ -123,6 +136,9 @@ def init_db() -> None:
             target_weight REAL DEFAULT 0,
             asset_type TEXT DEFAULT 'Hisse',
             coupon_date TEXT DEFAULT '',
+            entry_fx REAL DEFAULT 0,
+            buy_fee REAL DEFAULT 0,
+            gross_amount REAL DEFAULT 0,
             status TEXT DEFAULT 'open'
         )
         """
@@ -141,7 +157,12 @@ def init_db() -> None:
             pnl_pct REAL,
             note TEXT,
             source TEXT,
-            asset_type TEXT DEFAULT 'Hisse'
+            asset_type TEXT DEFAULT 'Hisse',
+            entry_fx REAL DEFAULT 0,
+            exit_fx REAL DEFAULT 0,
+            pnl_try REAL DEFAULT 0,
+            buy_fee REAL DEFAULT 0,
+            sell_fee REAL DEFAULT 0
         )
         """
     )
@@ -190,6 +211,10 @@ def init_db() -> None:
         cur.execute("ALTER TABLE trades_history ADD COLUMN exit_fx REAL DEFAULT 0")
     if "pnl_try" not in history_cols:
         cur.execute("ALTER TABLE trades_history ADD COLUMN pnl_try REAL DEFAULT 0")
+    if "buy_fee" not in history_cols:
+        cur.execute("ALTER TABLE trades_history ADD COLUMN buy_fee REAL DEFAULT 0")
+    if "sell_fee" not in history_cols:
+        cur.execute("ALTER TABLE trades_history ADD COLUMN sell_fee REAL DEFAULT 0")
     conn.commit()
     conn.close()
     maybe_sync_initial_cash_with_positions()
@@ -239,6 +264,7 @@ def get_estimated_tax_rate() -> float:
     value = get_app_state_float("estimated_tax_rate", 15.0)
     if value < 0:
         value = 0.0
+        buy_fee = float(row.get("buy_fee", 0) or 0)
     if value > 100:
         value = 100.0
     return float(value)
@@ -372,7 +398,7 @@ def add_cash_transaction(tx_type: str, amount: float, note: str = "") -> None:
         VALUES (?, ?, ?, ?)
         """,
         (
-            datetime.now().isoformat(timespec="seconds"),
+            created_at or datetime.now().isoformat(timespec="seconds"),
             tx_type,
             float(amount),
             note,
@@ -476,14 +502,17 @@ def add_portfolio_position(
     asset_type: str = "Hisse",
     coupon_date: str = "",
     entry_fx: Optional[float] = None,
+    buy_fee: float = 0.0,
+    gross_amount: Optional[float] = None,
+    created_at: Optional[str] = None,
 ) -> None:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     effective_entry_fx = float(entry_fx) if entry_fx and entry_fx > 0 else float(get_usdtry_rate())
     cur.execute(
         """
-        INSERT INTO portfolio (created_at, symbol, entry_price, quantity, note, source, target_weight, asset_type, coupon_date, status, entry_fx)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+        INSERT INTO portfolio (created_at, symbol, entry_price, quantity, note, source, target_weight, asset_type, coupon_date, status, entry_fx, buy_fee, gross_amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
         """,
         (
             datetime.now().isoformat(timespec="seconds"),
@@ -496,6 +525,8 @@ def add_portfolio_position(
             asset_type,
             coupon_date,
             effective_entry_fx,
+            float(buy_fee),
+            float(gross_amount) if gross_amount is not None else float(entry_price) * float(quantity),
         ),
     )
     conn.commit()
@@ -520,22 +551,22 @@ def close_portfolio_position(position_id: int, exit_price: float) -> None:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     row = cur.execute(
-        "SELECT created_at, symbol, entry_price, quantity, note, source, asset_type, COALESCE(entry_fx, 0) FROM portfolio WHERE id = ?",
+        "SELECT created_at, symbol, entry_price, quantity, note, source, asset_type, COALESCE(entry_fx, 0), COALESCE(buy_fee, 0) FROM portfolio WHERE id = ?",
         (int(position_id),),
     ).fetchone()
     if row is None:
         conn.close()
         return
-    opened_at, symbol, entry_price, quantity, note, source, asset_type, entry_fx = row
-    pnl = (float(exit_price) - float(entry_price)) * float(quantity)
+    opened_at, symbol, entry_price, quantity, note, source, asset_type, entry_fx, buy_fee = row
+    pnl = ((float(exit_price) - float(entry_price)) * float(quantity)) - float(buy_fee or 0)
     pnl_pct = ((float(exit_price) / float(entry_price)) - 1) * 100 if float(entry_price) else 0.0
     effective_entry_fx = float(entry_fx) if float(entry_fx or 0) > 0 else float(get_usdtry_rate())
     exit_fx = float(get_usdtry_rate())
-    pnl_try = ((float(exit_price) * exit_fx) - (float(entry_price) * effective_entry_fx)) * float(quantity)
+    pnl_try = (((float(exit_price) * exit_fx) - (float(entry_price) * effective_entry_fx)) * float(quantity)) - (float(buy_fee or 0) * exit_fx)
     cur.execute(
         """
-        INSERT INTO trades_history (opened_at, closed_at, symbol, entry_price, exit_price, quantity, pnl, pnl_pct, note, source, asset_type, entry_fx, exit_fx, pnl_try)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO trades_history (opened_at, closed_at, symbol, entry_price, exit_price, quantity, pnl, pnl_pct, note, source, asset_type, entry_fx, exit_fx, pnl_try, buy_fee, sell_fee)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             opened_at,
@@ -552,6 +583,8 @@ def close_portfolio_position(position_id: int, exit_price: float) -> None:
             effective_entry_fx,
             exit_fx,
             float(pnl_try),
+            float(buy_fee or 0),
+            0.0,
         ),
     )
     cur.execute("UPDATE portfolio SET status='closed' WHERE id = ?", (int(position_id),))
@@ -1008,6 +1041,9 @@ def onboarding_sidebar() -> Tuple[str, bool]:
         st.rerun()
     usdtry = get_usdtry_rate()
     st.sidebar.markdown(f"**Net Sermaye:** {format_price(get_initial_cash())}")
+    demo_label = get_app_state("demo_seed_label", "")
+    if demo_label:
+        st.sidebar.caption(demo_label)
     st.sidebar.caption(f"Kur: 1 USD ≈ ₺{format_number(usdtry)}")
     current_tax = get_estimated_tax_rate()
     chosen_tax = st.sidebar.number_input("Tahmini vergi oranı (%)", min_value=0.0, max_value=100.0, value=float(current_tax), step=1.0)
@@ -1039,12 +1075,13 @@ def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
         action = "TUT"
         alert = "Pozisyon izleniyor"
         value = 0.0
+        buy_fee = float(row.get("buy_fee", 0) or 0)
         if not raw.empty:
             df_ind = add_indicators(raw)
             current_price = float(df_ind["Close"].iloc[-1])
             value = current_price * float(row["quantity"])
             invested_now += value
-            pnl = (current_price - float(row["entry_price"])) * float(row["quantity"])
+            pnl = ((current_price - float(row["entry_price"])) * float(row["quantity"])) - buy_fee
             pnl_pct = ((current_price / float(row["entry_price"])) - 1) * 100 if float(row["entry_price"]) else 0.0
             last_atr = safe_float(df_ind["ATR14"].iloc[-1]) or 0.0
             stop = float(row["entry_price"]) - (1.5 * last_atr)
@@ -1058,7 +1095,7 @@ def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
             elif pnl_pct <= -3:
                 action = "AZALT / DİKKAT"
                 alert = "Zarar artıyor, dikkat gerekli"
-        entry_value = float(row["entry_price"]) * float(row["quantity"])
+        entry_value = (float(row["entry_price"]) * float(row["quantity"])) + buy_fee
         rows.append(
             {
                 "ID": int(row["id"]),
@@ -1073,11 +1110,13 @@ def build_open_positions() -> Tuple[List[Dict[str, Any]], float]:
                 "Giriş Değeri Sayısal": entry_value,
                 "PnL": format_price(pnl),
                 "PnL %": f"%{round(float(pnl_pct), 2)}",
+                "Komisyon": format_price(buy_fee),
                 "% Portföy": "-",
                 "Durum": action,
                 "Stop": format_price(stop) if stop is not None else "-",
                 "Hedef": format_price(target) if target is not None else "-",
                 "Hedef Pay": f"%{round(float(row.get('target_weight', 0))*100, 0)}" if float(row.get("target_weight", 0)) > 0 else "-",
+                "Alım Tutarı": format_price(float(row.get("gross_amount", 0) or (float(row["entry_price"]) * float(row["quantity"])))),
                 "Hedef Pay Sayısal": float(row.get("target_weight", 0) or 0),
                 "Not": str(row["note"] or ""),
                 "Uyarı": alert,
@@ -1245,7 +1284,7 @@ def render_open_positions(rows: List[Dict[str, Any]], current_equity: float) -> 
         return
     for row in rows:
         row["% Portföy"] = f"%{round((row['Pozisyon Değeri Sayısal'] / max(current_equity, 1e-9)) * 100, 2)}"
-    show_df = pd.DataFrame(rows)[["Sembol", "Kaynak", "Alış", "Güncel", "PnL", "PnL %", "% Portföy", "Hedef Pay", "Durum", "Stop", "Hedef", "Not"]]
+    show_df = pd.DataFrame(rows)[["Sembol", "Kaynak", "Alış", "Alım Tutarı", "Komisyon", "Güncel", "PnL", "PnL %", "% Portföy", "Hedef Pay", "Durum", "Stop", "Hedef", "Not"]]
     st.dataframe(show_df, use_container_width=True, hide_index=True)
     st.markdown("#### Pozisyon Sat")
     for row in rows[:8]:
@@ -2073,6 +2112,7 @@ def render_dashboard_page(profile_name: str, open_rows: List[Dict[str, Any]], sn
         st.markdown('</div>', unsafe_allow_html=True)
         render_dashboard_chart_allocation(open_rows, snapshot)
 
+    render_weekly_plan(snapshot, open_rows, radar_sections)
     render_dashboard_chart_equity(snapshot)
 
 
@@ -2122,6 +2162,96 @@ def render_sidebar_navigation() -> str:
     return page
 
 
+
+def has_any_user_data() -> bool:
+    open_df = load_open_portfolio()
+    hist_df = load_history(1)
+    cash_df = load_cash_transactions()
+    return (not open_df.empty) or (not hist_df.empty) or (not cash_df.empty) or get_initial_cash() > 0
+
+
+def seed_midas_demo_portfolio(force: bool = False) -> bool:
+    if not force and has_any_user_data():
+        return False
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM portfolio")
+    cur.execute("DELETE FROM trades_history")
+    cur.execute("DELETE FROM cash_transactions")
+    cur.execute("DELETE FROM dividends_history")
+    conn.commit()
+    conn.close()
+    set_initial_cash(MIDAS_DEMO_USD, source="manual")
+    set_app_state("demo_seed_label", "Midas Demo · 18.03.2026")
+    set_app_state("demo_initial_try", str(MIDAS_DEMO_INITIAL_TRY))
+    set_app_state("demo_initial_usdtry", str(MIDAS_DEMO_USDTRY))
+    for item in MIDAS_DEMO_POSITIONS:
+        add_portfolio_position(
+            item["symbol"],
+            float(item["entry_price"]),
+            float(item["quantity"]),
+            note=f"Midas demo işlemi · Brüt alım {format_price(float(item['gross_amount']))} · Komisyon {format_price(float(item['buy_fee']))}",
+            source=str(item.get("source", "MIDAS DEMO")),
+            target_weight=0.15,
+            asset_type="Hisse",
+            entry_fx=MIDAS_DEMO_USDTRY,
+            buy_fee=float(item["buy_fee"]),
+            gross_amount=float(item["gross_amount"]),
+            created_at=MIDAS_DEMO_DATE,
+        )
+    return True
+
+
+def get_weekly_budget_try() -> float:
+    value = get_app_state_float("weekly_budget_try", 2500.0)
+    return max(0.0, float(value))
+
+
+def set_weekly_budget_try(value: float) -> None:
+    set_app_state("weekly_budget_try", str(max(0.0, float(value))))
+
+
+def render_weekly_plan(snapshot: Dict[str, float], open_rows: List[Dict[str, Any]], radar_sections: Dict[str, List[Dict[str, Any]]]) -> None:
+    budget_try = get_weekly_budget_try()
+    usd_budget = budget_try / max(get_usdtry_rate(), 1e-9)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Bu Hafta Planın</div><div class="section-sub">Bütçeni değiştirene kadar aynı tutar devam eder. İstersen bu hafta pas geçebilirsin.</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        budget_in = st.number_input("Haftalık bütçe (TL)", min_value=0.0, value=float(budget_try), step=250.0, key="weekly_budget_input")
+        if abs(budget_in - budget_try) > 1e-9:
+            set_weekly_budget_try(budget_in)
+            budget_try = budget_in
+            usd_budget = budget_try / max(get_usdtry_rate(), 1e-9)
+    with c2:
+        st.markdown(f"<div class='list-shell'><div class='list-row'><div class='list-left'>USD karşılığı</div><div class='list-right'>{format_price(usd_budget)}</div></div><div class='list-row'><div class='list-left'>Bu hafta</div><div class='list-right'>{'Pas geçilebilir' if usd_budget <= 0 else 'Plan üretildi'}</div></div></div>", unsafe_allow_html=True)
+    if st.button("Bu hafta pas geç", key="skip_week", use_container_width=True):
+        set_weekly_budget_try(0.0)
+        st.rerun()
+    if usd_budget <= 0:
+        st.info("Bu hafta için yatırım planı pas geçildi. İstediğin zaman bütçeyi yeniden açabilirsin.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+    suggestions = []
+    if radar_sections.get("ekleme"):
+        item = radar_sections["ekleme"][0]
+        suggestions.append(("Ekleme", item["Sembol"], min(usd_budget * 0.45, 25.0)))
+    if radar_sections.get("yeni") and len(suggestions) < 2:
+        item = radar_sections["yeni"][0]
+        suggestions.append(("Yeni pozisyon", item["Sembol"], min(max(10.0, usd_budget * 0.35), usd_budget)))
+    for row in open_rows:
+        if len(suggestions) >= 2:
+            break
+        if row["Sembol"] not in [s[1] for s in suggestions]:
+            suggestions.append(("Mevcut pozisyonu izle", row["Sembol"], min(usd_budget * 0.25, 15.0)))
+    remaining = max(0.0, usd_budget - sum(s[2] for s in suggestions))
+    st.markdown(f"<div class='list-shell'>", unsafe_allow_html=True)
+    for label, symbol, amount in suggestions:
+        st.markdown(f"<div class='list-row'><div class='list-left'>{symbol}</div><div class='list-right'>{label} · {format_price(amount)}</div></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='list-row'><div class='list-left'>Nakit / bekleme</div><div class='list-right'>{format_price(remaining)}</div></div></div>", unsafe_allow_html=True)
+    st.caption("Atlas her hafta mutlaka işlem önermez. Güçlü bir görünüm yoksa bütçenin bir kısmını nakitte bırakabilir.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
 def main_streamlit() -> None:
     st.set_page_config(page_title=APP_TITLE, page_icon="📈", layout="wide")
     inject_css()
@@ -2132,6 +2262,11 @@ def main_streamlit() -> None:
         st.markdown('<div class="card"><div class="section-title">Atlas ile Başlangıç</div><div class="section-sub">3 kısa sorudan sonra sana uygun profil belirlenir. Ardından Atlas sana Türkçe ve sade bir başlangıç portföyü önerir.</div></div>', unsafe_allow_html=True)
         return
 
+    if not has_any_user_data():
+        seed_midas_demo_portfolio(force=True)
+    if st.sidebar.button("Midas demo portföyünü yeniden kur", use_container_width=True):
+        seed_midas_demo_portfolio(force=True)
+        st.rerun()
     page = render_sidebar_navigation()
     open_rows, invested_now = build_open_positions()
     snapshot = compute_portfolio_snapshot(open_rows, invested_now)
